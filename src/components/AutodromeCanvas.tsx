@@ -21,6 +21,13 @@ import {
   stepRaceSession,
 } from '../physics/raceEngine';
 import {
+  buildTimeTrialTelemetry,
+  createTimeTrialSession,
+  stepTimeTrialSession,
+  TimeTrialSessionState,
+} from '../physics/timeTrialEngine';
+import { getCircuitBestLapMs, recordTimeTrialLap } from '../data/timeTrialStorage';
+import {
   createMutableAtmosphereColors,
   evaluateDynamicWeather,
 } from '../physics/dynamicWeather';
@@ -42,6 +49,13 @@ import {
   GpCutsceneCameraGoal,
   GpCutsceneRigHandle,
 } from '../scene/gpCutscene';
+import {
+  CHAMPIONSHIP_VICTORY_DURATION,
+  createVictoryCutsceneRig,
+  RACE_VICTORY_DURATION,
+  VictoryCutsceneCameraGoal,
+  VictoryCutsceneRigHandle,
+} from '../scene/victoryCutscene';
 import { BASE_HALF_WIDTH } from '../data/circuits';
 import {
   captureReplayFrame,
@@ -70,7 +84,11 @@ import {
   ReplayCameraMode,
   ReplayPlaybackState,
   resolveCarLivery,
+  TimeTrialTelemetry,
   TrackCameraMode,
+  VictoryBeatId,
+  VictoryContext,
+  VictoryStatusSnapshot,
   WeatherStatusSnapshot,
 } from '../types/menu';
 
@@ -86,11 +104,15 @@ interface AutodromeCanvasProps {
   careerRoundSeed?: number;
   replayRecording?: ReplayRecording | null;
   replayControlRef?: MutableRefObject<ReplayControlBridge>;
+  victoryContext?: VictoryContext | null;
   onTelemetryUpdate: (telemetry: DrivingTelemetry) => void;
   onRaceTelemetryUpdate?: (raceTelemetry: RaceTelemetry) => void;
+  onTimeTrialTelemetryUpdate?: (timeTrialTelemetry: TimeTrialTelemetry) => void;
   onWeatherStatusUpdate?: (status: WeatherStatusSnapshot) => void;
   onCutsceneStatusUpdate?: (status: CutsceneStatusSnapshot) => void;
   onCutsceneComplete?: () => void;
+  onVictoryStatusUpdate?: (status: VictoryStatusSnapshot) => void;
+  onVictoryComplete?: () => void;
   onReplayAvailable?: (recording: ReplayRecording) => void;
   onReplayPlaybackUpdate?: (state: ReplayPlaybackState) => void;
   onReplayRivalsUpdate?: (rivals: RaceMinimapCar[]) => void;
@@ -194,7 +216,11 @@ function lerpAngle(a: number, b: number, t: number): number {
 }
 
 function isTrackDrivingScreen(s: MenuScreen): boolean {
-  return s === 'free-drive-track' || s === 'quick-race-track';
+  return (
+    s === 'free-drive-track' ||
+    s === 'quick-race-track' ||
+    s === 'time-trial-track'
+  );
 }
 
 function isSetupOrDrivingScreen(s: MenuScreen): boolean {
@@ -203,7 +229,10 @@ function isSetupOrDrivingScreen(s: MenuScreen): boolean {
     s === 'free-drive-track' ||
     s === 'quick-race' ||
     s === 'gp-cutscene' ||
-    s === 'quick-race-track'
+    s === 'quick-race-track' ||
+    s === 'time-trial' ||
+    s === 'time-trial-track' ||
+    s === 'victory-cutscene'
   );
 }
 
@@ -271,11 +300,15 @@ export function AutodromeCanvas({
   careerRoundSeed = 0,
   replayRecording = null,
   replayControlRef,
+  victoryContext = null,
   onTelemetryUpdate,
   onRaceTelemetryUpdate,
+  onTimeTrialTelemetryUpdate,
   onWeatherStatusUpdate,
   onCutsceneStatusUpdate,
   onCutsceneComplete,
+  onVictoryStatusUpdate,
+  onVictoryComplete,
   onReplayAvailable,
   onReplayPlaybackUpdate,
   onReplayRivalsUpdate,
@@ -286,7 +319,9 @@ export function AutodromeCanvas({
   const carRef = useRef<FormulaCarHandle | null>(null);
   const aiCarMeshesRef = useRef<AiFormulaCarHandle[]>([]);
   const gpCutsceneRigRef = useRef<GpCutsceneRigHandle | null>(null);
+  const victoryCutsceneRigRef = useRef<VictoryCutsceneRigHandle | null>(null);
   const raceSessionRef = useRef<RaceSessionState | null>(null);
+  const timeTrialSessionRef = useRef<TimeTrialSessionState | null>(null);
   const autodromeRef = useRef<AutodromeHandle | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -337,16 +372,29 @@ export function AutodromeCanvas({
   const lastCutsceneBeatRef = useRef<CutsceneBeatId | ''>('');
   const lastCutsceneEmitTimeRef = useRef<number>(-1);
 
+  const victoryElapsedRef = useRef<number>(0);
+  const victoryCompleteEmittedRef = useRef<boolean>(false);
+  const lastVictoryBeatRef = useRef<VictoryBeatId | ''>('');
+  const lastVictoryEmitTimeRef = useRef<number>(-1);
+  const victoryContextRef = useRef<VictoryContext | null>(victoryContext);
+  victoryContextRef.current = victoryContext;
+
   const telemetryCbRef = useRef(onTelemetryUpdate);
   telemetryCbRef.current = onTelemetryUpdate;
   const raceTelemetryCbRef = useRef(onRaceTelemetryUpdate);
   raceTelemetryCbRef.current = onRaceTelemetryUpdate;
+  const timeTrialTelemetryCbRef = useRef(onTimeTrialTelemetryUpdate);
+  timeTrialTelemetryCbRef.current = onTimeTrialTelemetryUpdate;
   const weatherStatusCbRef = useRef(onWeatherStatusUpdate);
   weatherStatusCbRef.current = onWeatherStatusUpdate;
   const cutsceneStatusCbRef = useRef(onCutsceneStatusUpdate);
   cutsceneStatusCbRef.current = onCutsceneStatusUpdate;
   const cutsceneCompleteCbRef = useRef(onCutsceneComplete);
   cutsceneCompleteCbRef.current = onCutsceneComplete;
+  const victoryStatusCbRef = useRef(onVictoryStatusUpdate);
+  victoryStatusCbRef.current = onVictoryStatusUpdate;
+  const victoryCompleteCbRef = useRef(onVictoryComplete);
+  victoryCompleteCbRef.current = onVictoryComplete;
   const replayAvailableCbRef = useRef(onReplayAvailable);
   replayAvailableCbRef.current = onReplayAvailable;
   const replayPlaybackCbRef = useRef(onReplayPlaybackUpdate);
@@ -566,12 +614,30 @@ export function AutodromeCanvas({
         z: circuit.spawnPos[2],
         yaw: circuit.spawnRotY,
       });
+
+      if (modeScreen === 'time-trial-track') {
+        const storedBest = getCircuitBestLapMs(activeCircuitId);
+        const ttSession = createTimeTrialSession(activeCircuitId, storedBest);
+        timeTrialSessionRef.current = ttSession;
+        timeTrialTelemetryCbRef.current?.(buildTimeTrialTelemetry(ttSession));
+      } else {
+        timeTrialSessionRef.current = null;
+      }
+    }
+
+    if (modeScreen === 'quick-race-track') {
+      timeTrialSessionRef.current = null;
     }
 
     const activeCircuit =
       CIRCUIT_OPTIONS.find((c) => c.id === activeCircuitId) ?? CIRCUIT_OPTIONS[0];
     const recording = createReplayRecording({
-      mode: modeScreen === 'quick-race-track' ? 'quick-race' : 'free-drive',
+      mode:
+        modeScreen === 'quick-race-track'
+          ? 'quick-race'
+          : modeScreen === 'time-trial-track'
+            ? 'time-trial'
+            : 'free-drive',
       circuitId: activeCircuitId,
       circuitName: activeCircuit.name,
       timeOfDay: cfgTime,
@@ -589,7 +655,10 @@ export function AutodromeCanvas({
     replayPostFinishTimerRef.current = 0;
     replayHasNotifiedRef.current = false;
     replayFinishNotifiedRef.current = false;
-    if (modeScreen === 'free-drive-track' && physicsRef.current) {
+    if (
+      (modeScreen === 'free-drive-track' || modeScreen === 'time-trial-track') &&
+      physicsRef.current
+    ) {
       captureReplayFrame(
         recording,
         0,
@@ -598,6 +667,12 @@ export function AutodromeCanvas({
         dynWeatherStatusRef.current.wetness,
         autoWeatherClockRef.current,
         null,
+        timeTrialSessionRef.current
+          ? {
+              lapNumber: timeTrialSessionRef.current.lapNumber,
+              bestLapMs: timeTrialSessionRef.current.bestLapMs,
+            }
+          : null,
       );
     }
   };
@@ -680,6 +755,8 @@ export function AutodromeCanvas({
     const nowDriving = isTrackDrivingScreen(screen);
     const wasCutscene = prevScreen === 'gp-cutscene';
     const nowCutscene = screen === 'gp-cutscene';
+    const wasVictory = prevScreen === 'victory-cutscene';
+    const nowVictory = screen === 'victory-cutscene';
     const wasReplay = prevScreen === 'replay';
     const nowReplay = screen === 'replay';
 
@@ -689,6 +766,7 @@ export function AutodromeCanvas({
       if (
         (!wasDriving && nowDriving) ||
         (!wasCutscene && nowCutscene) ||
+        (!wasVictory && nowVictory) ||
         (nowDriving && prevTrackCam !== trackCamera) ||
         (nowDriving && prevScreen !== screen) ||
         (!wasReplay && nowReplay)
@@ -709,11 +787,13 @@ export function AutodromeCanvas({
     if (car && autodrome) {
       if (nowReplay && replayRecording) {
         gpCutsceneRigRef.current?.setVisible(false);
+        victoryCutsceneRigRef.current?.setVisible(false);
         autodrome.setShowcaseDriverPose('hidden');
         if (!wasReplay) {
           initReplaySession(replayRecording);
         }
       } else if (nowCutscene) {
+        victoryCutsceneRigRef.current?.setVisible(false);
         if (!wasCutscene) {
           initTrackSession('quick-race-track', undefined, true);
           cutsceneElapsedRef.current = 0;
@@ -726,7 +806,27 @@ export function AutodromeCanvas({
           car.setCockpitView(true);
           cutsceneStatusCbRef.current?.({ beat: 'pit-prep', progress: 0 });
         }
+      } else if (nowVictory) {
+        gpCutsceneRigRef.current?.setVisible(false);
+        autodrome.setShowcaseDriverPose('hidden');
+        autodrome.setRaceStartLights(null);
+        if (!wasVictory) {
+          const vType = victoryContext?.type ?? 'race-win';
+          victoryElapsedRef.current = 0;
+          victoryCompleteEmittedRef.current = false;
+          lastVictoryBeatRef.current = '';
+          lastVictoryEmitTimeRef.current = -1;
+          victoryCutsceneRigRef.current?.resetSequence();
+          victoryCutsceneRigRef.current?.setCustomization(customization);
+          victoryCutsceneRigRef.current?.setVisible(true);
+          victoryStatusCbRef.current?.({
+            type: vType,
+            beat: vType === 'championship-win' ? 'parc-ferme-arrival' : 'finish-cross',
+            progress: 0,
+          });
+        }
       } else {
+        victoryCutsceneRigRef.current?.setVisible(false);
         if (wasReplay) {
           car.updateCustomization(customization);
           if (!nowDriving && activeCircuitIdRef.current !== freeDriveConfig.circuitId) {
@@ -740,7 +840,19 @@ export function AutodromeCanvas({
         if (nowDriving && prevScreen !== screen) {
           gpCutsceneRigRef.current?.setVisible(false);
           autodrome.setShowcaseDriverPose('hidden');
-          if (
+          if (wasVictory && screen === 'quick-race-track' && raceSessionRef.current) {
+            // Preserve finished race standings & replay when returning from Victory Cutscene
+            if (physicsRef.current) {
+              physicsRef.current.vx = 0;
+              physicsRef.current.vz = 0;
+              physicsRef.current.speedMs = 0;
+              physicsRef.current.speedKmh = 0;
+              physicsRef.current.throttleSmooth = 0;
+            }
+            ambientAudio.updateDrivingAudio(false, 0, 0);
+            syncAiMeshesFromSession(raceSessionRef.current, true);
+            raceTelemetryCbRef.current?.(buildRaceTelemetry(raceSessionRef.current));
+          } else if (
             wasCutscene &&
             screen === 'quick-race-track' &&
             raceSessionRef.current &&
@@ -754,6 +866,7 @@ export function AutodromeCanvas({
           gpCutsceneRigRef.current?.setVisible(false);
           autodrome.setShowcaseDriverPose('showcase');
           raceSessionRef.current = null;
+          timeTrialSessionRef.current = null;
           aiCarMeshesRef.current.forEach((m) => {
             m.group.visible = false;
           });
@@ -786,6 +899,7 @@ export function AutodromeCanvas({
     settings.cameraMotion,
     settings.graphicsQuality,
     replayRecording,
+    victoryContext,
   ]);
 
   useEffect(() => {
@@ -810,6 +924,7 @@ export function AutodromeCanvas({
     carRef.current?.updateCustomization(customization);
     autodromeRef.current?.updateShowcaseDriver(customization);
     gpCutsceneRigRef.current?.setCustomization(customization);
+    victoryCutsceneRigRef.current?.setCustomization(customization);
   }, [customization]);
 
   useEffect(() => {
@@ -1020,6 +1135,11 @@ export function AutodromeCanvas({
     gpCutsceneRigRef.current = gpCutsceneRig;
     scene.add(gpCutsceneRig.group);
 
+    const victoryCutsceneRig = createVictoryCutsceneRig(maxAniso);
+    victoryCutsceneRig.setCustomization(customization);
+    victoryCutsceneRigRef.current = victoryCutsceneRig;
+    scene.add(victoryCutsceneRig.group);
+
     aiCarMeshesRef.current = [];
 
     let viewportW = container.clientWidth || window.innerWidth;
@@ -1065,7 +1185,22 @@ export function AutodromeCanvas({
     let smoothedDelta = 1 / 60;
     let audioTimer = 0;
     let hudTimer = 0.033;
+    let raceHudTimer = 0.085;
+    let ttHudTimer = 0.033;
+    let prevTtPhase = '';
+    let prevTtCompletedLaps = -1;
+    let prevTtBannerVisible = false;
+    let prevTtSector = -1;
+    let autoWeatherApplyTimer = 0.25;
     let weatherEmitTimer = 0;
+    let prevRacePhase = '';
+    let prevLightsCount = -1;
+    let prevLightsBanner = false;
+    let prevRaceLap = -1;
+    let prevRacePos = -1;
+    let prevDrsActive = false;
+    let prevDrsAvail = false;
+    let prevTrackWarnings = -1;
     let lastEmittedCurrent = dynWeatherStatusRef.current.current;
     let lastEmittedNext = dynWeatherStatusRef.current.next;
     let lastEmittedSetting = dynWeatherStatusRef.current.setting;
@@ -1074,6 +1209,8 @@ export function AutodromeCanvas({
     const targetGoalLook = new THREE.Vector3();
     const fwdVec = new THREE.Vector3();
     const carPosVec = new THREE.Vector3();
+    const cockpitLocalPosVec = new THREE.Vector3();
+    const cockpitLocalLookVec = new THREE.Vector3();
     const chaseDirVec = new THREE.Vector3(1, 0, 0);
     let chaseDirInitialized = false;
     let chaseSpeedSmoothed = 0;
@@ -1084,6 +1221,12 @@ export function AutodromeCanvas({
       pos: new THREE.Vector3(),
       target: new THREE.Vector3(),
       fov: 38,
+      snap: false,
+    };
+    const victoryCamGoal: VictoryCutsceneCameraGoal = {
+      pos: new THREE.Vector3(),
+      target: new THREE.Vector3(),
+      fov: 40,
       snap: false,
     };
 
@@ -1127,12 +1270,11 @@ export function AutodromeCanvas({
       }
 
       if (mode === 'cockpit') {
-        const pitchAdj = carObj.rotation.x * 0.35;
-        outPos.copy(carPosVec).addScaledVector(fwdVec, 0.08 - highSpeedPull * 0.06);
-        outPos.y += 0.785;
-        outTarget.copy(carPosVec).addScaledVector(fwdVec, 14.0);
-        outTarget.y += 0.47 - pitchAdj * 11.0;
-        return 66 + speedRatio * 5;
+        cockpitLocalPosVec.set(0, 0.805, 0.17);
+        cockpitLocalLookVec.set(0, 0.42, 15.0);
+        outPos.copy(cockpitLocalPosVec).applyQuaternion(carObj.quaternion).add(carPosVec);
+        outTarget.copy(cockpitLocalLookVec).applyQuaternion(carObj.quaternion).add(carPosVec);
+        return 74 + speedRatio * 5;
       }
 
       if (mode === 'orbit') {
@@ -1188,6 +1330,9 @@ export function AutodromeCanvas({
       const inCutscene =
         st.screen === 'gp-cutscene' &&
         Boolean(raceSessionRef.current && gpCutsceneRigRef.current && corridorRef.current);
+      const inVictory =
+        st.screen === 'victory-cutscene' &&
+        Boolean(victoryCutsceneRigRef.current && victoryContextRef.current);
       const inReplay =
         st.screen === 'replay' &&
         Boolean(replayRecordingRef.current && replayRecordingRef.current.frames.length > 0);
@@ -1197,21 +1342,26 @@ export function AutodromeCanvas({
       if (isSetupOrDrivingScreen(st.screen) && st.freeDriveConfig.weather === 'auto') {
         const raceCountdownActive =
           st.screen === 'gp-cutscene' ||
+          st.screen === 'victory-cutscene' ||
           (st.screen === 'quick-race-track' && raceSessionRef.current?.phase === 'countdown');
         if (onTrack && !raceCountdownActive) {
           autoWeatherClockRef.current += rawDelta;
         }
-        evaluateDynamicWeather(
-          'auto',
-          st.freeDriveConfig.timeOfDay,
-          autoWeatherClockRef.current,
-          st.freeDriveConfig.circuitId,
-          dynAtmoRef.current,
-          dynWeatherStatusRef.current,
-        );
-        autodrome.applyAtmosphereColors(dynAtmoRef.current, scene);
-        sunOffsetRef.current.set(...dynAtmoRef.current.sunPosition);
-        sunVisibilityRef.current = dynAtmoRef.current.sunVisibility;
+        autoWeatherApplyTimer += rawDelta;
+        if (autoWeatherApplyTimer >= 0.25) {
+          autoWeatherApplyTimer = 0;
+          evaluateDynamicWeather(
+            'auto',
+            st.freeDriveConfig.timeOfDay,
+            autoWeatherClockRef.current,
+            st.freeDriveConfig.circuitId,
+            dynAtmoRef.current,
+            dynWeatherStatusRef.current,
+          );
+          autodrome.applyAtmosphereColors(dynAtmoRef.current, scene);
+          sunOffsetRef.current.set(...dynAtmoRef.current.sunPosition);
+          sunVisibilityRef.current = dynAtmoRef.current.sunVisibility;
+        }
       }
 
       let activeConcreteWeather = isSetupOrDrivingScreen(st.screen)
@@ -1225,6 +1375,8 @@ export function AutodromeCanvas({
         const phys = physicsRef.current;
         const raceSession =
           st.screen === 'quick-race-track' ? raceSessionRef.current : null;
+        const ttSession =
+          st.screen === 'time-trial-track' ? timeTrialSessionRef.current : null;
         physicsAccumulator += rawDelta;
 
         let subSteps = 0;
@@ -1306,12 +1458,30 @@ export function AutodromeCanvas({
                   phys.speedKmh = phys.speedMs * 3.6;
                 }
               }
+            } else if (ttSession) {
+              stepTimeTrialSession(ttSession, phys, PHYSICS_FIXED_DT, {
+                onTimerStart: () => {
+                  ambientAudio.playRaceLightBeep(true);
+                },
+                onLapComplete: (lapMs) => {
+                  const playerLivery = resolveCarLivery(st.customization);
+                  recordTimeTrialLap(
+                    st.freeDriveConfig.circuitId,
+                    lapMs,
+                    playerLivery,
+                  );
+                  ambientAudio.playRaceLightBeep(true);
+                },
+              });
             }
           }
 
           // Capture 30Hz Replay Telemetry Frame
           const activeRec = activeRecordingRef.current;
           const isCountingDown = Boolean(raceSession && raceSession.phase === 'countdown');
+          const ttReplayInfo = ttSession
+            ? { lapNumber: ttSession.lapNumber, bestLapMs: ttSession.bestLapMs }
+            : null;
           if (activeRec && !isCountingDown) {
             if (raceSession?.phase === 'finished') {
               replayPostFinishTimerRef.current += PHYSICS_FIXED_DT;
@@ -1326,6 +1496,7 @@ export function AutodromeCanvas({
                   activeWetness,
                   autoWeatherClockRef.current,
                   raceSession,
+                  ttReplayInfo,
                 );
               } else {
                 replayRecordElapsedRef.current += PHYSICS_FIXED_DT;
@@ -1340,6 +1511,7 @@ export function AutodromeCanvas({
                     activeWetness,
                     autoWeatherClockRef.current,
                     raceSession,
+                    ttReplayInfo,
                   );
                 }
               }
@@ -1374,6 +1546,7 @@ export function AutodromeCanvas({
         activeIsSliding = phys.slipIntensity > 0.25;
         activeBrake = phys.brakeSmooth;
 
+        formulaCar.setCockpitView(st.trackCamera === 'cockpit');
         formulaCar.group.position.set(renderX, renderY, renderZ);
         formulaCar.group.rotation.set(renderPitch, renderYaw, renderRoll);
 
@@ -1425,8 +1598,54 @@ export function AutodromeCanvas({
             z: renderZ,
             yaw: renderYaw,
           });
-          if (raceSession && raceTelemetryCbRef.current) {
+        }
+
+        if (raceSession && raceTelemetryCbRef.current) {
+          raceHudTimer += rawDelta;
+          const playerEntry = raceSession.standings.find((s) => s.isPlayer);
+          const curPos = playerEntry?.position ?? 10;
+          const curLap = raceSession.player.completedLaps;
+          const curLightsBanner = raceSession.lightsOutTimer > 0;
+          const importantTransition =
+            raceSession.phase !== prevRacePhase ||
+            raceSession.startLightsCount !== prevLightsCount ||
+            curLightsBanner !== prevLightsBanner ||
+            curLap !== prevRaceLap ||
+            curPos !== prevRacePos ||
+            raceSession.player.drsActive !== prevDrsActive ||
+            raceSession.player.drsAvailable !== prevDrsAvail ||
+            raceSession.player.trackLimitWarnings !== prevTrackWarnings;
+
+          if (importantTransition || raceHudTimer >= 0.083) {
+            raceHudTimer = 0;
+            prevRacePhase = raceSession.phase;
+            prevLightsCount = raceSession.startLightsCount;
+            prevLightsBanner = curLightsBanner;
+            prevRaceLap = curLap;
+            prevRacePos = curPos;
+            prevDrsActive = raceSession.player.drsActive;
+            prevDrsAvail = raceSession.player.drsAvailable;
+            prevTrackWarnings = raceSession.player.trackLimitWarnings;
             raceTelemetryCbRef.current(buildRaceTelemetry(raceSession));
+          }
+        }
+
+        if (ttSession && timeTrialTelemetryCbRef.current) {
+          ttHudTimer += rawDelta;
+          const bannerVisible = ttSession.lapCompleteBannerTimer > 0;
+          const importantTtTransition =
+            ttSession.phase !== prevTtPhase ||
+            ttSession.completedLaps !== prevTtCompletedLaps ||
+            bannerVisible !== prevTtBannerVisible ||
+            ttSession.sector !== prevTtSector;
+
+          if (importantTtTransition || ttHudTimer >= 0.033) {
+            ttHudTimer = 0;
+            prevTtPhase = ttSession.phase;
+            prevTtCompletedLaps = ttSession.completedLaps;
+            prevTtBannerVisible = bannerVisible;
+            prevTtSector = ttSession.sector;
+            timeTrialTelemetryCbRef.current(buildTimeTrialTelemetry(ttSession));
           }
         }
       } else if (inCutscene && raceSessionRef.current && gpCutsceneRigRef.current) {
@@ -1488,6 +1707,85 @@ export function AutodromeCanvas({
         ) {
           cutsceneCompleteEmittedRef.current = true;
           cutsceneCompleteCbRef.current?.();
+        }
+      } else if (inVictory && victoryCutsceneRigRef.current && victoryContextRef.current) {
+        victoryElapsedRef.current += rawDelta;
+        const vType = victoryContextRef.current.type;
+        const vDur =
+          vType === 'championship-win'
+            ? CHAMPIONSHIP_VICTORY_DURATION
+            : RACE_VICTORY_DURATION;
+        const tVic = Math.min(vDur, victoryElapsedRef.current);
+        const vRes = victoryCutsceneRigRef.current.update(
+          tVic,
+          vType,
+          formulaCar,
+          aiCarMeshesRef.current,
+          raceSessionRef.current,
+          autodrome,
+          victoryCamGoal,
+        );
+
+        activeSpeedMs = vRes.carSpeedMs;
+        activeSpeedKmh = vRes.carSpeedMs * 3.6;
+        activeBrake = vRes.brake;
+
+        if (vRes.triggerBurst) {
+          ambientAudio.playCelebrationBurst();
+        }
+
+        const focusX =
+          vType === 'championship-win' && tVic >= 7.5
+            ? 61.5
+            : formulaCar.group.position.x;
+        const focusY =
+          vType === 'championship-win' && tVic >= 7.5
+            ? 4.4
+            : formulaCar.group.position.y;
+        const focusZ =
+          vType === 'championship-win' && tVic >= 7.5
+            ? -38.0
+            : formulaCar.group.position.z;
+        const snapX = Math.round(focusX / shadowTexel) * shadowTexel;
+        const snapZ = Math.round(focusZ / shadowTexel) * shadowTexel;
+        autodrome.keyLight.target.position.set(snapX, focusY, snapZ);
+        autodrome.keyLight.position.set(
+          snapX + sunOffsetRef.current.x,
+          focusY + sunOffsetRef.current.y,
+          snapZ + sunOffsetRef.current.z,
+        );
+        autodrome.keyLight.target.updateMatrixWorld();
+
+        audioTimer += rawDelta;
+        if (audioTimer >= 0.033) {
+          audioTimer = 0;
+          ambientAudio.updateDrivingAudio(
+            vRes.engineActive,
+            vRes.rpmRatio,
+            vRes.throttle,
+          );
+        }
+
+        if (
+          vRes.beat !== lastVictoryBeatRef.current ||
+          tVic - lastVictoryEmitTimeRef.current >= 0.06 ||
+          tVic >= vDur
+        ) {
+          lastVictoryBeatRef.current = vRes.beat;
+          lastVictoryEmitTimeRef.current = tVic;
+          victoryStatusCbRef.current?.({
+            type: vRes.type,
+            beat: vRes.beat,
+            progress: vRes.progress,
+          });
+        }
+
+        if (
+          victoryElapsedRef.current >= vDur &&
+          !victoryCompleteEmittedRef.current
+        ) {
+          victoryCompleteEmittedRef.current = true;
+          victoryCompleteCbRef.current?.();
         }
       } else if (inReplay && replayRecordingRef.current && replayControlRef?.current) {
         const rec = replayRecordingRef.current;
@@ -1702,6 +2000,7 @@ export function AutodromeCanvas({
         st.screen === 'career' ||
         st.screen === 'free-drive' ||
         st.screen === 'quick-race' ||
+        st.screen === 'time-trial' ||
         isCarOrbitMode;
       controls.enabled = isOrbitAllowed;
       controls.minDistance = isCarOrbitMode ? 2.8 : 2.4;
@@ -1752,6 +2051,16 @@ export function AutodromeCanvas({
           targetGoalLook.copy(cutsceneCamGoal.target);
           goalFov = cutsceneCamGoal.fov;
           if (cutsceneCamGoal.snap || st.snapTrackCam) {
+            forceSnap = true;
+            st.snapTrackCam = false;
+          } else {
+            rigidFollow = true;
+          }
+        } else if (inVictory) {
+          targetGoalPos.copy(victoryCamGoal.pos);
+          targetGoalLook.copy(victoryCamGoal.target);
+          goalFov = victoryCamGoal.fov;
+          if (victoryCamGoal.snap || st.snapTrackCam) {
             forceSnap = true;
             st.snapTrackCam = false;
           } else {
@@ -1841,7 +2150,11 @@ export function AutodromeCanvas({
           targetGoalPos.copy(g.pos);
           targetGoalLook.copy(g.target);
           goalFov = g.fov;
-        } else if (st.screen === 'free-drive' || st.screen === 'quick-race') {
+        } else if (
+          st.screen === 'free-drive' ||
+          st.screen === 'quick-race' ||
+          st.screen === 'time-trial'
+        ) {
           const g = FREE_DRIVE_SETUP_PRESETS[st.garagePreset];
           targetGoalPos.copy(g.pos);
           targetGoalLook.copy(g.target);
@@ -1886,7 +2199,10 @@ export function AutodromeCanvas({
               ? customDampLambda
               : onTrack || inReplay
                 ? 14.0
-                : st.screen === 'garage' || st.screen === 'free-drive' || st.screen === 'quick-race'
+                : st.screen === 'garage' ||
+                    st.screen === 'free-drive' ||
+                    st.screen === 'quick-race' ||
+                    st.screen === 'time-trial'
                   ? 5.2
                   : 3.6;
 
@@ -1992,6 +2308,8 @@ export function AutodromeCanvas({
       aiCarMeshesRef.current = [];
       gpCutsceneRigRef.current?.dispose();
       gpCutsceneRigRef.current = null;
+      victoryCutsceneRigRef.current?.dispose();
+      victoryCutsceneRigRef.current = null;
       formulaCar.dispose();
       autodrome.dispose();
       envTex.dispose();

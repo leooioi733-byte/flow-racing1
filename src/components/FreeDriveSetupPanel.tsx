@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getTeamDrivers, TEAMS_2026 } from '../data/grid2026';
+import { loadTimeTrialRecords } from '../data/timeTrialStorage';
 import { UiStrings } from '../i18n/translations';
 import { createCircuitSvgProjection } from '../physics/formulaPhysics';
 import {
@@ -37,7 +38,7 @@ import {
 interface FreeDriveSetupPanelProps {
   t: UiStrings;
   lang: 'en' | 'pt';
-  mode?: 'free-drive' | 'quick-race';
+  mode?: 'free-drive' | 'quick-race' | 'time-trial';
   customization: CarCustomization;
   config: FreeDriveConfig;
   cameraPreset: GarageCameraPreset;
@@ -47,6 +48,8 @@ interface FreeDriveSetupPanelProps {
   onStartDrive: () => void;
   hasLastReplay?: boolean;
   onWatchLastReplay?: () => void;
+  savedReplaysCount?: number;
+  onOpenReplayArchive?: () => void;
   onBack: () => void;
 }
 
@@ -73,10 +76,32 @@ export function FreeDriveSetupPanel({
   onStartDrive,
   hasLastReplay = false,
   onWatchLastReplay,
+  savedReplaysCount = 0,
+  onOpenReplayArchive,
   onBack,
 }: FreeDriveSetupPanelProps) {
   const [activeTab, setActiveTab] = useState<SetupTab>('vehicle');
   const isQuickRace = mode === 'quick-race';
+  const isTimeTrial = mode === 'time-trial';
+  const panelTitle = isQuickRace
+    ? t.quickRace.title
+    : isTimeTrial
+      ? t.timeTrial.title
+      : t.freeDriveTitle;
+  const panelSubtitle = isQuickRace
+    ? t.quickRace.subtitle
+    : isTimeTrial
+      ? t.timeTrial.subtitle
+      : t.freeDriveSubtitle;
+  const timeTrialRecords = useMemo(() => loadTimeTrialRecords(), [mode]);
+
+  const formatRecordMs = (ms: number) => {
+    const totalSec = ms / 1000;
+    const mins = Math.floor(totalSec / 60);
+    const secs = Math.floor(totalSec % 60);
+    const hundredths = Math.floor((ms % 1000) / 10);
+    return `${mins}:${String(secs).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
+  };
 
   const circuitPreviews = useMemo(
     () =>
@@ -115,7 +140,7 @@ export function FreeDriveSetupPanel({
 
           <div className="hidden sm:flex items-center gap-2.5 text-xs text-white/85">
             <span className="font-display font-bold tracking-[0.22em]">
-              {isQuickRace ? t.quickRace.title : t.freeDriveTitle}
+              {panelTitle}
             </span>
             <span aria-hidden="true" className="text-white/40">·</span>
             <span className="text-white/70">{t.dragToOrbit}</span>
@@ -151,10 +176,10 @@ export function FreeDriveSetupPanel({
           <div className="flex items-baseline justify-between gap-2 mb-3">
             <div>
               <h2 className="font-display text-base sm:text-lg font-bold tracking-[0.16em] text-white">
-                {isQuickRace ? t.quickRace.title : t.freeDriveTitle}
+                {panelTitle}
               </h2>
               <p className="text-[11px] text-slate-300">
-                {isQuickRace ? t.quickRace.subtitle : t.freeDriveSubtitle}
+                {panelSubtitle}
               </p>
             </div>
             <span className="text-[11px] font-medium text-[#7dd3fc] whitespace-nowrap">
@@ -449,6 +474,17 @@ export function FreeDriveSetupPanel({
 
                       <p className="mt-1 text-[10px] font-medium text-[#7dd3fc] truncate">
                         {lang === 'pt' ? circuit.characterPt : circuit.characterEn}
+                        {isTimeTrial && (
+                          <>
+                            <span aria-hidden="true"> · </span>
+                            <span className="font-mono-tabular text-emerald-300">
+                              {t.timeTrial.circuitRecordLabel}:{' '}
+                              {timeTrialRecords[circuit.id]?.bestLapMs
+                                ? formatRecordMs(timeTrialRecords[circuit.id].bestLapMs)
+                                : t.timeTrial.noRecordYet}
+                            </span>
+                          </>
+                        )}
                       </p>
 
                       <p className="mt-1 text-[11px] text-slate-300 leading-relaxed">
@@ -713,7 +749,7 @@ export function FreeDriveSetupPanel({
             )}
           </div>
 
-          {/* Highlighted START DRIVE CTA + Watch Last Replay */}
+          {/* Highlighted START DRIVE CTA + Saved Replays Archive */}
           <div className="pt-3.5 mt-3 border-t border-white/10 shrink-0 flex flex-col gap-2">
             <button
               type="button"
@@ -727,15 +763,33 @@ export function FreeDriveSetupPanel({
               <ChevronRight className="w-4 h-4 text-white/85 transition-transform duration-150 group-hover:translate-x-0.5" />
             </button>
 
-            {hasLastReplay && onWatchLastReplay && (
-              <button
-                type="button"
-                onClick={onWatchLastReplay}
-                className="w-full flex items-center justify-center gap-2 min-h-[38px] px-4 py-1.5 rounded-xl bg-[#182433] hover:bg-[#223246] border border-[#38bdf8]/35 text-xs font-semibold text-[#7dd3fc] transition-colors cursor-pointer whitespace-nowrap"
-              >
-                <Film className="w-3.5 h-3.5" />
-                <span>{t.replay.watchLastReplay}</span>
-              </button>
+            {(onOpenReplayArchive || (hasLastReplay && onWatchLastReplay)) && (
+              <div className="flex items-center gap-2">
+                {onOpenReplayArchive && (
+                  <button
+                    type="button"
+                    onClick={onOpenReplayArchive}
+                    className="flex-1 flex items-center justify-center gap-2 min-h-[38px] px-3 py-1.5 rounded-xl bg-[#182433] hover:bg-[#223246] border border-white/14 text-xs font-semibold text-slate-100 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Film className="w-3.5 h-3.5 text-[#7dd3fc]" />
+                    <span>
+                      {t.replayArchive.buttonLabel}
+                      {savedReplaysCount > 0 ? ` (${savedReplaysCount})` : ''}
+                    </span>
+                  </button>
+                )}
+
+                {hasLastReplay && onWatchLastReplay && (
+                  <button
+                    type="button"
+                    onClick={onWatchLastReplay}
+                    className="flex items-center justify-center gap-2 min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#182433] hover:bg-[#223246] border border-[#38bdf8]/35 text-xs font-semibold text-[#7dd3fc] transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>{t.replay.watchLastReplay}</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

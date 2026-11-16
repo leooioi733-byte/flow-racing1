@@ -427,7 +427,11 @@ export interface AiCarState {
   launchCooldown: number;
 }
 
+let nextRaceRunId = 1;
+
 export interface RaceSessionState {
+  runId: number;
+  standingsTickCount: number;
   spline: TrackSplineMap;
   phase: RacePhase;
   totalLaps: number;
@@ -541,6 +545,8 @@ export function createRaceSession(
   );
 
   const session: RaceSessionState = {
+    runId: nextRaceRunId++,
+    standingsTickCount: 0,
     spline,
     phase: 'countdown',
     totalLaps,
@@ -1273,6 +1279,7 @@ export function stepRaceSession(
   player.prevSplineDistM = proj.distM;
   player.progressM += deltaAlong;
 
+  const prevCompletedLaps = player.completedLaps;
   if (!player.finished && player.progressM >= (player.completedLaps + 1) * spline.totalLengthM) {
     player.completedLaps += 1;
     if (player.completedLaps >= 1) {
@@ -1321,7 +1328,14 @@ export function stepRaceSession(
     }
   }
 
-  recomputeStandings(session);
+  session.standingsTickCount += 1;
+  if (
+    player.completedLaps !== prevCompletedLaps ||
+    player.finished ||
+    session.standingsTickCount % 3 === 0
+  ) {
+    recomputeStandings(session);
+  }
 
   // Official F1 DRS: active from Lap 2+, in DRS zone, within 1.15s behind car ahead
   const playerLap = Math.min(totalLaps, Math.max(1, player.completedLaps + 1));
@@ -1330,7 +1344,7 @@ export function stepRaceSession(
   const inZone = isInDrsZone(spline.circuitId, playerU);
   const withinOneSec = player.gapToAheadSec !== null && player.gapToAheadSec <= 1.15;
   player.drsAvailable = drsEnabled && inZone && withinOneSec;
-  player.drsActive = player.drsAvailable && throttleActive && phys.speedKmh > 120;
+  player.drsActive = player.drsAvailable && throttleActive && phys.speedMs > 0 && phys.speedKmh > 120;
 }
 
 export function buildRaceTelemetry(session: RaceSessionState): RaceTelemetry {
@@ -1346,6 +1360,7 @@ export function buildRaceTelemetry(session: RaceSessionState): RaceTelemetry {
   }));
 
   return {
+    runId: session.runId,
     phase: session.phase,
     startLightsCount: session.startLightsCount,
     lightsOutBanner: session.lightsOutTimer > 0,

@@ -28,6 +28,7 @@ import {
   WeatherCondition,
 } from '../types/menu';
 import { createPitLaneCar } from './formulaCar';
+import { createFlowHumanGeometries } from './humanAnatomy';
 import {
   createArchitecturalMetalMaps,
   createAsphaltMaps,
@@ -1708,18 +1709,20 @@ export function createAutodromeScene(
     }),
   );
 
-  // 11b. Signature Flow Studios Articulated Characters (clean eyeless faces matching user directive)
-  const humanHeadGeo = trackGeo(new THREE.SphereGeometry(0.135, 10, 8));
-  const hairCapGeo = trackGeo(new THREE.SphereGeometry(0.142, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.56));
-  const hairBangsGeo = trackGeo(new THREE.BoxGeometry(0.22, 0.075, 0.08));
-  const humanTorsoGeo = trackGeo(new THREE.BoxGeometry(0.36, 0.5, 0.2));
-  const humanShoulderGeo = trackGeo(new THREE.SphereGeometry(0.065, 8, 6));
-  const humanUpperArmGeo = trackGeo(new THREE.CylinderGeometry(0.048, 0.044, 0.25, 7));
-  const humanForearmGeo = trackGeo(new THREE.CylinderGeometry(0.042, 0.038, 0.25, 7));
-  const humanHandGeo = trackGeo(new THREE.BoxGeometry(0.065, 0.08, 0.065));
-  const humanLegGeo = trackGeo(new THREE.CylinderGeometry(0.06, 0.052, 0.68, 8));
-  const humanFootGeo = trackGeo(new THREE.BoxGeometry(0.1, 0.07, 0.19));
-  const headsetGeo = trackGeo(new THREE.TorusGeometry(0.145, 0.022, 6, 12, Math.PI));
+  // 11b. Signature Flow Studios Articulated Characters (smooth cylindrical torso/limbs + eyeless face)
+  const humanAnat = createFlowHumanGeometries(trackGeo);
+  const humanHeadGeo = humanAnat.headGeo;
+  const humanNeckGeo = humanAnat.neckGeo;
+  const hairCapGeo = humanAnat.hairShortGeo;
+  const hairBangsGeo = humanAnat.hairBangsGeo;
+  const humanTorsoGeo = humanAnat.torsoGeo;
+  const humanShoulderGeo = humanAnat.shoulderGeo;
+  const humanUpperArmGeo = humanAnat.upperArmGeo;
+  const humanForearmGeo = humanAnat.forearmGeo;
+  const humanHandGeo = humanAnat.handGeo;
+  const humanLegGeo = humanAnat.legGeo;
+  const humanFootGeo = humanAnat.footGeo;
+  const headsetGeo = humanAnat.headsetGeo;
   const tabletGeo = trackGeo(new THREE.BoxGeometry(0.32, 0.22, 0.025));
   const marshalFlagPoleGeo = trackGeo(new THREE.CylinderGeometry(0.016, 0.018, 1.15, 6));
   const marshalFlagClothGeo = trackGeo(new THREE.PlaneGeometry(0.68, 0.45));
@@ -1819,16 +1822,18 @@ export function createAutodromeScene(
       const leg = new THREE.Mesh(humanLegGeo, pantsMat);
       leg.position.set(lx, 0.4, 0);
       const foot = new THREE.Mesh(humanFootGeo, bootMat);
-      foot.position.set(lx, 0.035, 0.045);
+      foot.position.set(lx, 0.033, 0.045);
       ch.add(leg, foot);
     });
 
-    // Clean slender torso with F1 Overalls / Flow Studios pattern
+    // Clean slender cylindrical torso with F1 Overalls / Flow Studios pattern
     const torso = new THREE.Mesh(humanTorsoGeo, suitMat);
     torso.position.set(0, 1.0, 0);
-    ch.add(torso);
+    const neck = new THREE.Mesh(humanNeckGeo, helmeted ? suitMat : skinMat);
+    neck.position.set(0, 1.275, 0);
+    ch.add(torso, neck);
 
-    // Rounded eyeless face + cropped dark hair cap with bangs (or team helmet)
+    // Rounded eyeless face + cropped dark hair cap with curved bangs (or team helmet)
     const head = new THREE.Mesh(humanHeadGeo, helmeted ? suitMat : skinMat);
     head.position.set(0, 1.42, 0);
     ch.add(head);
@@ -1837,8 +1842,8 @@ export function createAutodromeScene(
       const cap = new THREE.Mesh(hairCapGeo, hairMat);
       cap.position.set(0, 1.43, -0.01);
       const bangs = new THREE.Mesh(hairBangsGeo, hairMat);
-      bangs.position.set(0, 1.49, 0.1);
-      bangs.rotation.x = 0.25;
+      bangs.position.set(0, 1.505, 0.095);
+      bangs.rotation.x = 0.28;
       ch.add(cap, bangs);
     } else {
       const headset = new THREE.Mesh(headsetGeo, darkSteelMat);
@@ -1969,7 +1974,7 @@ export function createAutodromeScene(
     const leg = new THREE.Mesh(humanLegGeo, showcasePantsMat);
     leg.position.set(lx, 0.4, 0);
     const boot = new THREE.Mesh(humanFootGeo, darkSteelMat);
-    boot.position.set(lx, 0.035, 0.045);
+    boot.position.set(lx, 0.033, 0.045);
     showcaseDriverGroup.add(leg, boot);
   });
 
@@ -1979,16 +1984,19 @@ export function createAutodromeScene(
   const sdHeadPivot = new THREE.Group();
   sdHeadPivot.position.set(0, 1.32, 0);
 
+  const sdNeck = new THREE.Mesh(humanNeckGeo, showcaseSkinMat);
+  sdNeck.position.set(0, -0.045, 0);
+
   const sdHead = new THREE.Mesh(humanHeadGeo, showcaseSkinMat);
   sdHead.position.set(0, 0.1, 0);
   const sdCap = new THREE.Mesh(hairCapGeo, showcaseHairMat);
   sdCap.position.set(0, 0.11, -0.01);
   const sdBangs = new THREE.Mesh(hairBangsGeo, showcaseHairMat);
-  sdBangs.position.set(0, 0.17, 0.1);
-  sdBangs.rotation.x = 0.25;
+  sdBangs.position.set(0, 0.185, 0.095);
+  sdBangs.rotation.x = 0.28;
 
   // Spiky crest & curly volume options
-  const spikeCrownGeo = trackGeo(new THREE.ConeGeometry(0.065, 0.11, 5));
+  const spikeCrownGeo = humanAnat.hairSpikeGeo;
   const sdSpikeGroup = new THREE.Group();
   sdSpikeGroup.position.set(0, 0.22, 0.02);
   [-0.05, 0, 0.05].forEach((sx, idx) => {
@@ -2000,25 +2008,21 @@ export function createAutodromeScene(
   });
   sdSpikeGroup.visible = false;
 
-  const curlyPuffGeo = trackGeo(new THREE.SphereGeometry(0.158, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.58));
-  const sdCurlyPuff = new THREE.Mesh(curlyPuffGeo, showcaseHairMat);
+  const sdCurlyPuff = new THREE.Mesh(humanAnat.curlyPuffGeo, showcaseHairMat);
   sdCurlyPuff.position.set(0, 0.13, -0.01);
   sdCurlyPuff.visible = false;
 
   // Sculpted beard options on lower jaw / chin
-  const beardFullGeo = trackGeo(
-    new THREE.SphereGeometry(0.141, 10, 8, 0, Math.PI * 2, Math.PI * 0.54, Math.PI * 0.42),
-  );
-  const sdBeardFull = new THREE.Mesh(beardFullGeo, showcaseBeardMat);
+  const sdBeardFull = new THREE.Mesh(humanAnat.beardFullGeo, showcaseBeardMat);
   sdBeardFull.position.set(0, 0.09, 0.012);
   sdBeardFull.visible = false;
 
-  const goateeGeo = trackGeo(new THREE.BoxGeometry(0.075, 0.065, 0.06));
-  const sdGoatee = new THREE.Mesh(goateeGeo, showcaseBeardMat);
-  sdGoatee.position.set(0, 0.0, 0.105);
+  const sdGoatee = new THREE.Mesh(humanAnat.beardGoateeGeo, showcaseBeardMat);
+  sdGoatee.position.set(0, 0.008, 0.112);
   sdGoatee.visible = false;
 
   sdHeadPivot.add(
+    sdNeck,
     sdHead,
     sdCap,
     sdBangs,
@@ -2043,27 +2047,19 @@ export function createAutodromeScene(
   const sdHandL = new THREE.Mesh(humanHandGeo, showcaseGlovesMat);
   sdHandL.position.set(-0.05, -0.36, 0.25);
 
-  const heldHelmetGeo = trackGeo(new THREE.SphereGeometry(0.145, 16, 12));
-  heldHelmetGeo.scale(0.94, 0.96, 1.12);
-  const heldHelmet = new THREE.Mesh(heldHelmetGeo, showcaseHelmetMat);
+  const heldHelmet = new THREE.Mesh(humanAnat.heldHelmetGeo, showcaseHelmetMat);
   heldHelmet.position.set(-0.07, -0.32, 0.14);
   heldHelmet.rotation.y = -0.35;
-  const heldStripeGeo = trackGeo(new THREE.BoxGeometry(0.048, 0.15, 0.26));
-  const heldStripe = new THREE.Mesh(heldStripeGeo, showcaseHelmetAccentMat);
-  heldStripe.position.set(-0.07, -0.255, 0.13);
-  heldStripe.rotation.y = -0.35;
-  const heldVisorGeo = trackGeo(new THREE.BoxGeometry(0.19, 0.065, 0.08));
-  const heldVisor = new THREE.Mesh(heldVisorGeo, showcaseVisorMat);
-  heldVisor.position.set(-0.11, -0.32, 0.27);
-  heldVisor.rotation.y = -0.35;
+  const heldStripe = new THREE.Mesh(humanAnat.heldStripeGeo, showcaseHelmetAccentMat);
+  heldStripe.scale.set(0.94, 0.96, 1.12);
+  const heldVisor = new THREE.Mesh(humanAnat.heldVisorGeo, showcaseVisorMat);
+  heldHelmet.add(heldStripe, heldVisor);
   sdLeftArmPivot.add(
     sdShL,
     sdUpL,
     sdForeL,
     sdHandL,
     heldHelmet,
-    heldStripe,
-    heldVisor,
   );
   showcaseDriverGroup.add(sdLeftArmPivot);
 

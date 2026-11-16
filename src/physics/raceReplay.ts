@@ -59,9 +59,20 @@ export interface ReplayFrame {
   ai: ReplayAiSample[];
 }
 
+export type ReplayCategory = 'free-drive' | 'career' | 'quick-race' | 'time-trial';
+
+export interface ReplayCareerMeta {
+  seasonYear: number;
+  roundNumber: number;
+  gpName: string;
+  isPractice?: boolean;
+}
+
 export interface ReplayRecording {
   id: string;
-  mode: 'free-drive' | 'quick-race';
+  mode: 'free-drive' | 'quick-race' | 'time-trial';
+  category?: ReplayCategory;
+  careerMeta?: ReplayCareerMeta;
   circuitId: string;
   circuitName: string;
   timeOfDay: TimeOfDay;
@@ -126,7 +137,7 @@ function lerpAngle(a: number, b: number, t: number): number {
 }
 
 export function createReplayRecording(params: {
-  mode: 'free-drive' | 'quick-race';
+  mode: 'free-drive' | 'quick-race' | 'time-trial';
   circuitId: string;
   circuitName: string;
   timeOfDay: TimeOfDay;
@@ -170,6 +181,7 @@ export function captureReplayFrame(
   wetness: number,
   autoWeatherClockSec: number,
   raceSession: RaceSessionState | null,
+  timeTrialInfo?: { lapNumber: number; bestLapMs: number | null } | null,
 ): void {
   if (recording.frames.length >= REPLAY_MAX_FRAMES) {
     // Keep ring window cleanly capped at 8 minutes by trimming oldest 600 frames (~20s)
@@ -207,6 +219,11 @@ export function captureReplayFrame(
         wheelSpin: car.wheelSpin,
         steerAngle: car.steerAngle,
       });
+    }
+  } else if (timeTrialInfo) {
+    playerLap = Math.max(1, timeTrialInfo.lapNumber);
+    if (timeTrialInfo.bestLapMs !== null) {
+      recording.bestLapMs = timeTrialInfo.bestLapMs;
     }
   }
 

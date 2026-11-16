@@ -22,6 +22,8 @@ interface PlayModePanelProps {
   onStartDrive: () => void;
   onOpenQuickRace: () => void;
   onStartQuickRace: () => void;
+  onOpenTimeTrial: () => void;
+  onStartTimeTrial: () => void;
   onOpenCareer: () => void;
   hasLastReplay?: boolean;
   onWatchLastReplay?: () => void;
@@ -35,6 +37,8 @@ export function PlayModePanel({
   onStartDrive,
   onOpenQuickRace,
   onStartQuickRace,
+  onOpenTimeTrial,
+  onStartTimeTrial,
   onOpenCareer,
   hasLastReplay = false,
   onWatchLastReplay,
@@ -81,8 +85,9 @@ export function PlayModePanel({
             const active = selectedId === mode.id;
             const isFreeDrive = mode.id === 'free-drive';
             const isQuickRace = mode.id === 'quick-race';
+            const isTimeTrial = mode.id === 'time-trial';
             const isCareer = mode.id === 'career';
-            const isPlayable = isFreeDrive || isQuickRace || isCareer;
+            const isPlayable = isFreeDrive || isQuickRace || isTimeTrial || isCareer;
             return (
               <div
                 key={mode.id}
@@ -137,11 +142,17 @@ export function PlayModePanel({
                   </div>
                 )}
 
-                {(isFreeDrive || isQuickRace) && active && (
+                {(isFreeDrive || isQuickRace || isTimeTrial) && active && (
                   <div className="px-3.5 pb-3.5 pt-1 flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={isQuickRace ? onStartQuickRace : onStartDrive}
+                      onClick={
+                        isQuickRace
+                          ? onStartQuickRace
+                          : isTimeTrial
+                            ? onStartTimeTrial
+                            : onStartDrive
+                      }
                       className="group flex-1 flex items-center justify-between min-h-[40px] px-4 py-2 rounded-xl bg-[#0b6884] hover:bg-[#0e7b9c] active:scale-[0.985] border border-[#38bdf8]/50 text-white shadow-[0_8px_20px_rgba(0,0,0,0.3)] transition-all cursor-pointer whitespace-nowrap"
                     >
                       <span className="flex items-center gap-2 font-display text-xs font-bold tracking-[0.18em]">
@@ -153,7 +164,13 @@ export function PlayModePanel({
 
                     <button
                       type="button"
-                      onClick={isQuickRace ? onOpenQuickRace : onOpenFreeDrive}
+                      onClick={
+                        isQuickRace
+                          ? onOpenQuickRace
+                          : isTimeTrial
+                            ? onOpenTimeTrial
+                            : onOpenFreeDrive
+                      }
                       className="flex items-center justify-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-[#182433] hover:bg-[#223246] border border-white/15 text-xs font-semibold text-white/95 transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     >
                       <Sliders className="w-3.5 h-3.5 text-[#7dd3fc]" />

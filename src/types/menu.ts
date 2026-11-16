@@ -16,6 +16,9 @@ export type MenuScreen =
   | 'quick-race'
   | 'gp-cutscene'
   | 'quick-race-track'
+  | 'time-trial'
+  | 'time-trial-track'
+  | 'victory-cutscene'
   | 'career'
   | 'play'
   | 'garage'
@@ -33,6 +36,46 @@ export type CutsceneBeatId =
 export interface CutsceneStatusSnapshot {
   beat: CutsceneBeatId;
   progress: number;
+}
+
+export type VictoryCutsceneType = 'race-win' | 'championship-win';
+
+export type VictoryBeatId =
+  | 'finish-cross'
+  | 'cooldown-lap'
+  | 'parc-ferme-arrival'
+  | 'driver-exit'
+  | 'podium-ceremony'
+  | 'trophy-lift';
+
+export type ChampionshipTitleId =
+  | 'drivers-champion'
+  | 'constructors-champion'
+  | 'double-champion'
+  | 'midfield-miracle';
+
+export interface VictoryStatusSnapshot {
+  type: VictoryCutsceneType;
+  beat: VictoryBeatId;
+  progress: number;
+}
+
+export interface VictoryContext {
+  runId: number;
+  type: VictoryCutsceneType;
+  driverName: string;
+  driverCode: string;
+  driverNumber: string;
+  teamName: string;
+  teamColorHex: string;
+  position: number;
+  raceName: string;
+  raceTimeMs: number | null;
+  isCareer: boolean;
+  seasonYear?: number;
+  championshipTitleId?: ChampionshipTitleId;
+  totalPoints?: number;
+  winsCount?: number;
 }
 
 export type AtmospherePreset = 'coastal-mist' | 'golden-hour' | 'clear-day';
@@ -242,6 +285,7 @@ export interface RaceStandingEntry {
 }
 
 export interface RaceTelemetry {
+  runId: number;
   phase: RacePhase;
   startLightsCount: number; // 0..5 red lights, 0 + phase==='racing' means Lights Out
   lightsOutBanner: boolean;
@@ -261,6 +305,30 @@ export interface RaceTelemetry {
   trackLimitToast: boolean;
   standings: RaceStandingEntry[];
   minimapRivals: RaceMinimapCar[];
+}
+
+export type TimeTrialPhase = 'waiting-line' | 'running';
+
+export interface TimeTrialLapEntry {
+  lap: number;
+  timeMs: number;
+  isBest: boolean;
+}
+
+export interface TimeTrialTelemetry {
+  phase: TimeTrialPhase;
+  lapNumber: number;
+  completedLaps: number;
+  currentLapMs: number;
+  lastLapMs: number | null;
+  bestLapMs: number | null;
+  circuitRecordMs: number | null;
+  deltaToBestMs: number | null;
+  isNewRecordBanner: boolean;
+  lapCompleteBannerTimer: number;
+  sector: 1 | 2 | 3;
+  sectorProgress: number;
+  recentLaps: TimeTrialLapEntry[];
 }
 
 export interface GameSettings {

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
+  Award,
   Calendar,
   Check,
   ChevronRight,
   Cloud,
   CloudRain,
   Compass,
+  Crown,
+  Film,
   Flag,
   Lock,
   Play,
@@ -49,6 +52,7 @@ import { UiStrings } from '../i18n/translations';
 import {
   CarCustomization,
   CareerCharacter,
+  ChampionshipTitleId,
   ConcreteWeather,
 } from '../types/menu';
 import { CharacterPortrait, HelmetPreviewSvg } from './CharacterPortrait';
@@ -70,6 +74,8 @@ interface CareerGridPanelProps {
   onDeleteCareer: () => void;
   onStartCareerRace: () => void;
   onStartCareerPractice: () => void;
+  savedReplaysCount?: number;
+  onOpenReplayArchive?: () => void;
   onBackToHome: () => void;
 }
 
@@ -96,6 +102,8 @@ export function CareerGridPanel({
   onDeleteCareer,
   onStartCareerRace,
   onStartCareerPractice,
+  savedReplaysCount = 0,
+  onOpenReplayArchive,
   onBackToHome,
 }: CareerGridPanelProps) {
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
@@ -337,6 +345,20 @@ export function CareerGridPanel({
             <span className="text-white/70">{t.dragToOrbit}</span>
           </div>
         </div>
+
+        {(step === 'entry' || step === 'hub') && onOpenReplayArchive && (
+          <button
+            type="button"
+            onClick={onOpenReplayArchive}
+            className="pointer-events-auto flex items-center gap-2 min-h-[40px] px-3.5 py-2 rounded-xl bg-[#15202c]/92 hover:bg-[#1e2d3e] border border-white/14 text-xs font-semibold text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Film className="w-4 h-4 text-[#7dd3fc]" />
+            <span>
+              {t.replayArchive.buttonLabel}
+              {savedReplaysCount > 0 ? ` (${savedReplaysCount})` : ''}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Main Left-Anchored Career Surface — Right viewport stays clear for 3D Car + Driver */}
@@ -1765,6 +1787,86 @@ export function CareerGridPanel({
                       )}
                     </div>
                   </div>
+
+                  {/* Trophies & Career Achievements */}
+                  {(() => {
+                    const achievements = careerSave.achievements ?? [];
+                    const championships = achievements.filter(
+                      (a) => a.type === 'championship',
+                    );
+                    const gpWins = achievements.filter(
+                      (a) => a.type === 'race-win',
+                    );
+                    return (
+                      <div className="rounded-xl bg-[#0e1620] border border-amber-400/25 p-4 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 text-xs font-bold text-white">
+                            <Trophy className="w-4 h-4 text-amber-300" />
+                            <span>{t.career.hub.achievementsTitle}</span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] font-mono-tabular">
+                            <span className="text-amber-300 font-bold">
+                              {championships.length} {t.career.hub.championshipsCountLabel}
+                            </span>
+                            <span className="text-slate-400">·</span>
+                            <span className="text-[#7dd3fc] font-bold">
+                              {gpWins.length} {t.career.hub.gpWinsCountLabel}
+                            </span>
+                          </div>
+                        </div>
+
+                        {achievements.length === 0 ? (
+                          <p className="text-[11px] text-slate-400">
+                            {t.career.hub.noAchievementsHint}
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {achievements.slice(0, 8).map((ach) => {
+                              const isChamp = ach.type === 'championship';
+                              const cTitle = ach.titleId;
+                              return (
+                                <div
+                                  key={ach.id}
+                                  className={`flex items-center gap-2.5 rounded-lg px-3 py-2 border ${
+                                    isChamp
+                                      ? 'bg-amber-500/12 border-amber-400/35'
+                                      : 'bg-[#15202d] border-white/10'
+                                  }`}
+                                >
+                                  <div
+                                    className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                                      isChamp
+                                        ? 'bg-amber-400/20 text-amber-300'
+                                        : 'bg-[#0b6884]/35 text-[#7dd3fc]'
+                                    }`}
+                                  >
+                                    {isChamp ? (
+                                      <Crown className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <Award className="w-3.5 h-3.5" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[11px] font-bold text-white truncate">
+                                      {isChamp && cTitle
+                                        ? t.victory.titles[cTitle]
+                                        : ach.gpName ?? ach.teamName}
+                                    </p>
+                                    <p className="text-[10px] text-slate-300 truncate">
+                                      {t.victory.seasonPrefix} {ach.seasonYear} · {ach.teamName}
+                                      {ach.points !== undefined
+                                        ? ` · ${ach.points} ${t.career.entry.pointsShort}`
+                                        : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Delete Save Option */}
                   <div className="pt-1 flex items-center justify-end gap-2">

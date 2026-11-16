@@ -12,6 +12,7 @@ import {
 import {
   BeardStyleId,
   CareerCharacter,
+  ChampionshipTitleId,
   ConcreteWeather,
   HairStyleId,
   HelmetStyleId,
@@ -163,6 +164,20 @@ export interface CareerTeamStat {
   podiums: number;
 }
 
+export interface CareerAchievementRecord {
+  id: string;
+  type: 'race-win' | 'championship';
+  titleId?: ChampionshipTitleId;
+  seasonYear: number;
+  roundNumber?: number;
+  gpName?: string;
+  teamId: OfficialTeamId;
+  teamName: string;
+  points: number;
+  wins: number;
+  earnedAt: number;
+}
+
 export interface CareerSaveState {
   version: 1;
   seasonYear: number;
@@ -174,6 +189,7 @@ export interface CareerSaveState {
   calendar: CareerRoundEntry[];
   driverStats: Record<string, CareerDriverStat>;
   teamStats: Record<OfficialTeamId, CareerTeamStat>;
+  achievements?: CareerAchievementRecord[];
   createdAt: number;
   updatedAt: number;
 }
@@ -301,6 +317,7 @@ export function createNewCareerSave(
     calendar: buildSeasonCalendar(),
     driverStats,
     teamStats,
+    achievements: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -325,6 +342,7 @@ export function startNextCareerSeason(
     calendar: buildSeasonCalendar(),
     driverStats,
     teamStats,
+    achievements: prev.achievements ?? [],
     updatedAt: now,
   };
 }
@@ -340,6 +358,9 @@ export function loadCareerSave(): CareerSaveState | null {
     }
     if (!Array.isArray(parsed.calendar) || parsed.calendar.length === 0) {
       return null;
+    }
+    if (!Array.isArray(parsed.achievements)) {
+      parsed.achievements = [];
     }
     return parsed;
   } catch {
@@ -496,6 +517,10 @@ export function recordCareerRaceResult(
   playerPosition: number;
   playerPointsEarned: number;
   newlyUnlockedTiers: TeamTier[];
+  isSeasonCompleted: boolean;
+  championshipTitleId: ChampionshipTitleId | null;
+  seasonTotalPoints: number;
+  seasonWins: number;
 } {
   const round = prev.calendar[roundIndex];
   if (!round || round.completed) {
@@ -505,6 +530,10 @@ export function recordCareerRaceResult(
       playerPosition: playerEntry?.position ?? 10,
       playerPointsEarned: 0,
       newlyUnlockedTiers: [],
+      isSeasonCompleted: prev.calendar.every((r) => r.completed),
+      championshipTitleId: null,
+      seasonTotalPoints: prev.driverStats.player?.points ?? 0,
+      seasonWins: prev.driverStats.player?.wins ?? 0,
     };
   }
 
@@ -604,6 +633,7 @@ export function recordCareerRaceResult(
   const playerWins = nextDriverStats.player?.wins ?? 0;
   const playerPodiums = nextDriverStats.player?.podiums ?? 0;
   const completedCount = nextCalendar.filter((r) => r.completed).length;
+  const isSeasonCompleted = completedCount === nextCalendar.length;
 
   const nextUnlocked = new Set<TeamTier>(prev.unlockedTiers);
   const newlyUnlockedTiers: TeamTier[] = [];
@@ -617,26 +647,90 @@ export function recordCareerRaceResult(
   }
   if (
     !nextUnlocked.has('elite') &&
-    (playerTotalPts >= 90 || playerWins >= 2 || (completedCount === nextCalendar.length && playerTotalPts >= 65))
+    (playerTotalPts >= 90 || playerWins >= 2 || (isSeasonCompleted && playerTotalPts >= 65))
   ) {
     nextUnlocked.add('elite');
     newlyUnlockedTiers.push('elite');
   }
 
-  const nextSave: CareerSaveState = {
+  const nextAchievements: CareerAchievementRecord[] = [...(prev.achievements ?? [])];
+  const playerTeam = getTeamById(prev.teamId);
+
+  if (playerPosition === 1) {
+    const winId = `gp-${prev.seasonYear}-r${round.round}`;
+    if (!nextAchievements.some((a) => a.id === winId)) {
+      nextAchievements.push({
+        id: winId,
+        type: 'race-win',
+        seasonYear: prev.seasonYear,
+        roundNumber: round.round,
+        gpName: round.gpName,
+        teamId: prev.teamId,
+        teamName: playerTeam.name,
+        points: playerPointsEarned,
+        wins: 1,
+        earnedAt: Date.now(),
+      });
+    }
+  }
+
+  const draftSave: CareerSaveState = {
     ...prev,
     currentRoundIndex: nextRoundIndex,
     unlockedTiers: Array.from(nextUnlocked),
     calendar: nextCalendar,
     driverStats: nextDriverStats,
     teamStats: nextTeamStats,
+    achievements: nextAchievements,
     updatedAt: Date.now(),
   };
 
+  let championshipTitleId: ChampionshipTitleId | null = null;
+  if (isSeasonCompleted) {
+    const dStandings = getCareerDriverStandings(draftSave);
+    const cStandings = getCareerConstructorStandings(draftSave);
+    const wonDrivers = Boolean(dStandings[0]?.isPlayer);
+    const wonConstructors = Boolean(cStandings[0]?.isPlayerTeam);
+
+    if (wonDrivers || wonConstructors) {
+      if (wonDrivers && wonConstructors) {
+        championshipTitleId = 'double-champion';
+      } else if (
+        wonDrivers &&
+        (playerTeam.tier === 'midfield' || playerTeam.tier === 'developing')
+      ) {
+        championshipTitleId = 'midfield-miracle';
+      } else if (wonDrivers) {
+        championshipTitleId = 'drivers-champion';
+      } else {
+        championshipTitleId = 'constructors-champion';
+      }
+
+      const champId = `champ-${prev.seasonYear}-${championshipTitleId}`;
+      if (!nextAchievements.some((a) => a.id === champId)) {
+        nextAchievements.push({
+          id: champId,
+          type: 'championship',
+          titleId: championshipTitleId,
+          seasonYear: prev.seasonYear,
+          teamId: prev.teamId,
+          teamName: playerTeam.name,
+          points: playerTotalPts,
+          wins: playerWins,
+          earnedAt: Date.now(),
+        });
+      }
+    }
+  }
+
   return {
-    nextSave,
+    nextSave: draftSave,
     playerPosition,
     playerPointsEarned,
     newlyUnlockedTiers,
+    isSeasonCompleted,
+    championshipTitleId,
+    seasonTotalPoints: playerTotalPts,
+    seasonWins: playerWins,
   };
 }

@@ -26,12 +26,17 @@
   canvas {
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
 
   button,
   [role="button"],
   input[type="range"] {
     touch-action: manipulation;
+  }
+
+  .touch-none {
+    touch-action: none !important;
   }
 
   input,

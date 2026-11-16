@@ -154,6 +154,9 @@ export interface UiStrings {
     colBestLap: string;
     colPen: string;
     leader: string;
+    towerTitle: string;
+    intervalHeader: string;
+    leaderShort: string;
     raceAgain: string;
     backToSetup: string;
     exitMenu: string;
@@ -294,6 +297,11 @@ export interface UiStrings {
       backToCareerHub: string;
       careerPointsEarned: string;
       tierUnlockedBanner: string;
+      achievementsTitle: string;
+      noAchievementsHint: string;
+      championshipsCountLabel: string;
+      gpWinsCountLabel: string;
+      championshipUnlockedBanner: string;
     };
   };
   replay: {
@@ -322,6 +330,54 @@ export interface UiStrings {
       orbit: string;
     };
   };
+  replayArchive: {
+    buttonLabel: string;
+    title: string;
+    subtitle: string;
+    filters: {
+      all: string;
+      'free-drive': string;
+      'time-trial': string;
+      career: string;
+    };
+    modeLabels: {
+      'career-race': string;
+      'career-practice': string;
+      'free-drive': string;
+      'quick-race': string;
+      'time-trial': string;
+    };
+    loading: string;
+    emptyTitle: string;
+    emptyDesc: string;
+    loadError: string;
+    lapsUnit: string;
+    bestLapLabel: string;
+    durationLabel: string;
+    watchCta: string;
+    watchSelectedCta: string;
+    deleteCta: string;
+    closeCta: string;
+    driverLabel: string;
+  };
+  timeTrial: {
+    title: string;
+    subtitle: string;
+    soloTag: string;
+    outLapLabel: string;
+    lapLabel: string;
+    sectorLabel: string;
+    waitingStartTitle: string;
+    waitingStartHint: string;
+    timerRunningLabel: string;
+    lastLapLabel: string;
+    bestLapLabel: string;
+    circuitRecordLabel: string;
+    noRecordYet: string;
+    lapCompleteTitle: string;
+    newRecordBadge: string;
+    recentLapsTitle: string;
+  };
   cutscene: {
     broadcastTag: string;
     skip: string;
@@ -339,6 +395,46 @@ export interface UiStrings {
       'drivers-ready': string;
       'grid-lineup': string;
       'grid-ready': string;
+    };
+  };
+  victory: {
+    raceWinTag: string;
+    championshipTag: string;
+    skip: string;
+    skipHint: string;
+    checkeredFlagBanner: string;
+    winnerBadge: string;
+    positionWonPrefix: string;
+    championshipName: string;
+    seasonPrefix: string;
+    pointsSuffix: string;
+    titles: {
+      'drivers-champion': string;
+      'constructors-champion': string;
+      'double-champion': string;
+      'midfield-miracle': string;
+    };
+    titleSubtitles: {
+      'drivers-champion': string;
+      'constructors-champion': string;
+      'double-champion': string;
+      'midfield-miracle': string;
+    };
+    beats: {
+      'finish-cross': string;
+      'cooldown-lap': string;
+      'parc-ferme-arrival': string;
+      'driver-exit': string;
+      'podium-ceremony': string;
+      'trophy-lift': string;
+    };
+    beatDetails: {
+      'finish-cross': string;
+      'cooldown-lap': string;
+      'parc-ferme-arrival': string;
+      'driver-exit': string;
+      'podium-ceremony': string;
+      'trophy-lift': string;
     };
   };
 }
@@ -379,8 +475,8 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
       {
         id: 'time-trial',
         title: 'Time Trial',
-        desc: 'Solo hotlap session with sector telemetry.',
-        status: 'Coming Next Stage',
+        desc: 'Solo hotlap session — cross the finish line to start the timer and stop it on your next pass.',
+        status: 'Playable',
       },
       {
         id: 'career',
@@ -523,6 +619,9 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
       colBestLap: 'BEST LAP',
       colPen: 'PEN',
       leader: 'LEADER',
+      towerTitle: 'STANDINGS',
+      intervalHeader: 'INT',
+      leaderShort: 'LDR',
       raceAgain: 'Race Again',
       backToSetup: 'Race Setup',
       exitMenu: 'Main Menu',
@@ -663,6 +762,11 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         backToCareerHub: 'Career Central',
         careerPointsEarned: 'Championship Points',
         tierUnlockedBanner: 'New Team Tier Unlocked',
+        achievementsTitle: 'Trophies & Achievements',
+        noAchievementsHint: 'Win Grands Prix and Championships to record trophies in your profile.',
+        championshipsCountLabel: 'Titles',
+        gpWinsCountLabel: 'GP Wins',
+        championshipUnlockedBanner: 'Championship Title Recorded',
       },
     },
     replay: {
@@ -691,6 +795,54 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         orbit: 'Orbit',
       },
     },
+    replayArchive: {
+      buttonLabel: 'Saved Replays',
+      title: 'SAVED REPLAYS',
+      subtitle: 'Select a recorded session to watch your race telemetry and camera angles',
+      filters: {
+        all: 'All',
+        'free-drive': 'Free Drive',
+        'time-trial': 'Time Trial',
+        career: 'Career',
+      },
+      modeLabels: {
+        'career-race': 'Career Grand Prix',
+        'career-practice': 'Career Practice',
+        'free-drive': 'Free Drive',
+        'quick-race': 'Quick Race',
+        'time-trial': 'Time Trial',
+      },
+      loading: 'Loading saved replays...',
+      emptyTitle: 'No saved replays yet',
+      emptyDesc: 'Drive in Free Drive or race in Career Mode — sessions longer than 1 second are saved here automatically.',
+      loadError: 'Could not load this replay from storage.',
+      lapsUnit: 'Laps',
+      bestLapLabel: 'Best Lap',
+      durationLabel: 'Duration',
+      watchCta: 'Watch',
+      watchSelectedCta: 'Watch Selected Replay',
+      deleteCta: 'Delete',
+      closeCta: 'Close',
+      driverLabel: 'Driver',
+    },
+    timeTrial: {
+      title: 'TIME TRIAL',
+      subtitle: 'Solo Hotlap · Finish-Line Triggered Clock',
+      soloTag: 'SOLO TRACK',
+      outLapLabel: 'RUN-UP',
+      lapLabel: 'LAP',
+      sectorLabel: 'S',
+      waitingStartTitle: 'CROSS THE START/FINISH LINE',
+      waitingStartHint: 'Lap timer starts automatically on line crossing',
+      timerRunningLabel: 'TIMED LAP',
+      lastLapLabel: 'LAST',
+      bestLapLabel: 'BEST',
+      circuitRecordLabel: 'RECORD',
+      noRecordYet: 'No record',
+      lapCompleteTitle: 'LAP COMPLETED',
+      newRecordBadge: 'NEW RECORD!',
+      recentLapsTitle: 'COMPLETED LAPS',
+    },
     cutscene: {
       broadcastTag: 'WORLD FEED · PRE-RACE',
       skip: 'Skip Intro',
@@ -708,6 +860,46 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         'drivers-ready': 'Drivers finalizing helmets, gloves & radio checks before rollout',
         'grid-lineup': '10 Formula cars rolling into their staggered starting grid slots',
         'grid-ready': 'Engines armed on the grid — prepare for the five red lights',
+      },
+    },
+    victory: {
+      raceWinTag: 'WORLD FEED · CHECKERED FLAG',
+      championshipTag: 'CHAMPIONSHIP CEREMONY · OFFICIAL PODIUM',
+      skip: 'Skip',
+      skipHint: 'Space / Enter / Esc to skip',
+      checkeredFlagBanner: 'CHECKERED FLAG · VICTORY!',
+      winnerBadge: 'GRAND PRIX WINNER',
+      positionWonPrefix: '1ST PLACE',
+      championshipName: 'Flow Racing World Championship',
+      seasonPrefix: 'Season',
+      pointsSuffix: 'pts',
+      titles: {
+        'drivers-champion': "World Drivers' Champion",
+        'constructors-champion': "World Constructors' Champion",
+        'double-champion': 'Double World Champion',
+        'midfield-miracle': 'Historic Underdog Champion',
+      },
+      titleSubtitles: {
+        'drivers-champion': 'Supreme consistency and pace across all Grand Prix rounds',
+        'constructors-champion': 'Lead constructor crowned at the summit of the 2026 grid',
+        'double-champion': 'Clean sweep — Drivers & Constructors World Championships secured',
+        'midfield-miracle': 'From underdog seat to World Championship glory against the elite',
+      },
+      beats: {
+        'finish-cross': 'FINISH LINE · CHECKERED FLAG',
+        'cooldown-lap': 'COOLDOWN LAP · VICTORY CELEBRATION',
+        'parc-ferme-arrival': 'PARC FERMÉ · CHAMPION ARRIVAL',
+        'driver-exit': 'CELEBRATION · DRIVER STEPS OUT',
+        'podium-ceremony': 'OFFICIAL PODIUM PRESENTATION',
+        'trophy-lift': 'CHAMPIONS CROWNED · TROPHY CEREMONY',
+      },
+      beatDetails: {
+        'finish-cross': 'Taking the checkered flag under the start/finish gantry to claim P1',
+        'cooldown-lap': 'Slowing down cleanly after the finish line to salute the grandstands',
+        'parc-ferme-arrival': 'Pulling the championship-winning car into the parc fermé podium zone',
+        'driver-exit': 'Stepping out of the cockpit to celebrate with the pit crew',
+        'podium-ceremony': 'Ascending to the P1 podium stage alongside the team mechanics',
+        'trophy-lift': 'Raising the championship trophy high amidst confetti and roaring cheers',
       },
     },
   },
@@ -746,8 +938,8 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
       {
         id: 'time-trial',
         title: 'Tomada de Tempo',
-        desc: 'Volta rápida solo com parciais de setor.',
-        status: 'Próxima Etapa',
+        desc: 'Sozinho na pista — o cronômetro inicia ao cruzar a linha e registra sua volta na passagem seguinte.',
+        status: 'Jogável',
       },
       {
         id: 'career',
@@ -890,6 +1082,9 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
       colBestLap: 'MELHOR VOLTA',
       colPen: 'PEN',
       leader: 'LÍDER',
+      towerTitle: 'POSIÇÕES',
+      intervalHeader: 'INT',
+      leaderShort: 'LÍD',
       raceAgain: 'Correr Novamente',
       backToSetup: 'Ajustes da Corrida',
       exitMenu: 'Menu Principal',
@@ -1030,6 +1225,11 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         backToCareerHub: 'Central da Carreira',
         careerPointsEarned: 'Pontos no Campeonato',
         tierUnlockedBanner: 'Nova Categoria de Equipes Desbloqueada',
+        achievementsTitle: 'Troféus e Conquistas',
+        noAchievementsHint: 'Vença Grandes Prêmios e Campeonatos para registrar troféus no seu perfil.',
+        championshipsCountLabel: 'Títulos',
+        gpWinsCountLabel: 'Vitórias GP',
+        championshipUnlockedBanner: 'Título Registrado no Perfil',
       },
     },
     replay: {
@@ -1058,6 +1258,54 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         orbit: 'Orbital',
       },
     },
+    replayArchive: {
+      buttonLabel: 'Replays Salvos',
+      title: 'REPLAYS SALVOS',
+      subtitle: 'Selecione uma sessão gravada para assistir com telemetria e câmeras de transmissão',
+      filters: {
+        all: 'Todos',
+        'free-drive': 'Treino Livre',
+        'time-trial': 'Tempo',
+        career: 'Carreira',
+      },
+      modeLabels: {
+        'career-race': 'GP da Carreira',
+        'career-practice': 'Treino da Carreira',
+        'free-drive': 'Treino Livre',
+        'quick-race': 'Corrida Rápida',
+        'time-trial': 'Tomada de Tempo',
+      },
+      loading: 'Carregando replays salvos...',
+      emptyTitle: 'Nenhum replay salvo ainda',
+      emptyDesc: 'Pilote no Treino Livre ou corra no Modo Carreira — suas sessões serão salvas aqui automaticamente.',
+      loadError: 'Não foi possível carregar este replay do armazenamento.',
+      lapsUnit: 'Voltas',
+      bestLapLabel: 'Melhor Volta',
+      durationLabel: 'Duração',
+      watchCta: 'Assistir',
+      watchSelectedCta: 'Assistir Replay Selecionado',
+      deleteCta: 'Excluir',
+      closeCta: 'Fechar',
+      driverLabel: 'Piloto',
+    },
+    timeTrial: {
+      title: 'TOMADA DE TEMPO',
+      subtitle: 'Pista Livre (Solo) · Cronômetro na Linha de Chegada',
+      soloTag: 'SOZINHO NA PISTA',
+      outLapLabel: 'SAÍDA',
+      lapLabel: 'VOLTA',
+      sectorLabel: 'S',
+      waitingStartTitle: 'CRUZE A LINHA DE CHEGADA',
+      waitingStartHint: 'O cronômetro inicia automaticamente ao passar pela linha',
+      timerRunningLabel: 'VOLTA CRONOMETRADA',
+      lastLapLabel: 'ÚLTIMA',
+      bestLapLabel: 'MELHOR',
+      circuitRecordLabel: 'RECORDE',
+      noRecordYet: 'Sem recorde',
+      lapCompleteTitle: 'VOLTA CONCLUÍDA',
+      newRecordBadge: 'NOVO RECORDE!',
+      recentLapsTitle: 'VOLTAS REGISTRADAS',
+    },
     cutscene: {
       broadcastTag: 'TRANSMISSÃO OFICIAL · PRÉ-GP',
       skip: 'Pular Cutscene',
@@ -1075,6 +1323,46 @@ export const TRANSLATIONS: Record<'en' | 'pt', UiStrings> = {
         'drivers-ready': 'Pilotos ajustando capacetes, luvas e rádio antes de ir para a pista',
         'grid-lineup': 'Os 10 carros se alinhando em suas posições de largada na reta principal',
         'grid-ready': 'Grid completo sob o pórtico — atenção às cinco luzes vermelhas',
+      },
+    },
+    victory: {
+      raceWinTag: 'TRANSMISSÃO OFICIAL · BANDEIRA QUADRICULADA',
+      championshipTag: 'CERIMÔNIA DO CAMPEONATO · PÓDIO OFICIAL',
+      skip: 'Pular',
+      skipHint: 'Espaço / Enter / Esc para pular',
+      checkeredFlagBanner: 'BANDEIRA QUADRICULADA · VITÓRIA!',
+      winnerBadge: 'VENCEDOR DO GRANDE PRÊMIO',
+      positionWonPrefix: '1º LUGAR',
+      championshipName: 'Campeonato Mundial Flow Racing',
+      seasonPrefix: 'Temporada',
+      pointsSuffix: 'pts',
+      titles: {
+        'drivers-champion': 'Campeão Mundial de Pilotos',
+        'constructors-champion': 'Campeão Mundial de Construtores',
+        'double-champion': 'Campeão Absoluto (Pilotos e Construtores)',
+        'midfield-miracle': 'Campeão Histórico da Temporada',
+      },
+      titleSubtitles: {
+        'drivers-champion': 'Consistência e velocidade impecáveis em todo o campeonato',
+        'constructors-champion': 'Equipe consagrada no topo da tabela de construtores de 2026',
+        'double-champion': 'Domínio total — títulos de Pilotos e Construtores garantidos',
+        'midfield-miracle': 'Da base do grid à glória máxima superando todas as potências',
+      },
+      beats: {
+        'finish-cross': 'LINHA DE CHEGADA · BANDEIRA QUADRICULADA',
+        'cooldown-lap': 'VOLTA DE DESACELERAÇÃO · VITÓRIA',
+        'parc-ferme-arrival': 'ÁREA DE COMEMORAÇÃO · CHEGADA DO CAMPEÃO',
+        'driver-exit': 'PARC FERMÉ · PILOTO SAINDO DO CARRO',
+        'podium-ceremony': 'APRESENTAÇÃO OFICIAL DO PÓDIO',
+        'trophy-lift': 'ENTREGA DO TROFÉU · COMEMORAÇÃO DA EQUIPE',
+      },
+      beatDetails: {
+        'finish-cross': 'Cruzando a linha de chegada sob a bandeira quadriculada em P1',
+        'cooldown-lap': 'Desacelerando após a chegada diante das arquibancadas em festa',
+        'parc-ferme-arrival': 'Estacionando o carro campeão na área oficial de comemoração',
+        'driver-exit': 'Saindo do cockpit para vibrar junto aos mecânicos da equipe',
+        'podium-ceremony': 'Subindo ao degrau mais alto do pódio sob os aplausos da torcida',
+        'trophy-lift': 'Erguendo o troféu de campeão entre confetes e a festa da equipe',
       },
     },
   },

@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Smartphone,
   Sun,
+  Timer,
   Trophy,
 } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -30,11 +31,13 @@ import { TeamTier } from '../data/grid2026';
 import {
   CareerCharacter,
   CarLiveryId,
+  ChampionshipTitleId,
   CIRCUIT_OPTIONS,
   DrivingTelemetry,
   FreeDriveConfig,
   RaceTelemetry,
   resolveCarLivery,
+  TimeTrialTelemetry,
   TrackCameraMode,
   WeatherCondition,
   WeatherStatusSnapshot,
@@ -45,6 +48,8 @@ interface FreeDriveTrackHudProps {
   t: UiStrings;
   lang?: 'en' | 'pt';
   raceMode?: boolean;
+  timeTrialMode?: boolean;
+  isCareerRace?: boolean;
   liveryId: CarLiveryId;
   driverId?: string;
   customDriver?: CareerCharacter;
@@ -53,6 +58,7 @@ interface FreeDriveTrackHudProps {
     totalRounds: number;
     pointsEarned: number;
     unlockedTiers: TeamTier[];
+    championshipTitleId?: ChampionshipTitleId | null;
   } | null;
   config: FreeDriveConfig;
   weatherStatus?: WeatherStatusSnapshot;
@@ -62,6 +68,10 @@ interface FreeDriveTrackHudProps {
   subscribeTelemetry: (listener: (tel: DrivingTelemetry) => void) => () => void;
   raceTelemetryRef?: MutableRefObject<RaceTelemetry | null>;
   subscribeRaceTelemetry?: (listener: (tel: RaceTelemetry) => void) => () => void;
+  timeTrialTelemetryRef?: MutableRefObject<TimeTrialTelemetry | null>;
+  subscribeTimeTrialTelemetry?: (
+    listener: (tel: TimeTrialTelemetry) => void,
+  ) => () => void;
   isPortrait: boolean;
   canWatchReplay?: boolean;
   onChangeCamera: (cam: TrackCameraMode) => void;
@@ -107,6 +117,8 @@ export function FreeDriveTrackHud({
   t,
   lang = 'en',
   raceMode = false,
+  timeTrialMode = false,
+  isCareerRace = false,
   liveryId,
   driverId,
   customDriver,
@@ -119,6 +131,8 @@ export function FreeDriveTrackHud({
   subscribeTelemetry,
   raceTelemetryRef,
   subscribeRaceTelemetry,
+  timeTrialTelemetryRef,
+  subscribeTimeTrialTelemetry,
   isPortrait,
   canWatchReplay = false,
   onChangeCamera,
@@ -145,18 +159,25 @@ export function FreeDriveTrackHud({
   const [raceHud, setRaceHud] = useState<RaceTelemetry | null>(
     () => (raceMode ? raceTelemetryRef?.current ?? null : null),
   );
+  const [ttHud, setTtHud] = useState<TimeTrialTelemetry | null>(
+    () => (timeTrialMode ? timeTrialTelemetryRef?.current ?? null : null),
+  );
 
   const minimapRef = useRef<CircuitMinimapHandle | null>(null);
   const gearElRef = useRef<HTMLSpanElement | null>(null);
   const speedElRef = useRef<HTMLSpanElement | null>(null);
   const rpmBarRef = useRef<HTMLDivElement | null>(null);
   const lapTimerRef = useRef<HTMLSpanElement | null>(null);
+  const ttTimerRef = useRef<HTMLSpanElement | null>(null);
   const prevAlertRef = useRef<'offTrack' | 'gripLoss' | null>(null);
   const prevRaceHudRef = useRef<RaceTelemetry | null>(null);
   const raceThrottleRef = useRef<number>(0);
+  const prevTtHudRef = useRef<TimeTrialTelemetry | null>(null);
+  const ttThrottleRef = useRef<number>(0);
 
   const activeKeysRef = useRef<Set<string>>(new Set());
   const activePointersRef = useRef<Map<number, ControlKey>>(new Map());
+  const steerPadRef = useRef<HTMLDivElement | null>(null);
 
   const camCycleRef = useRef<() => void>(() => {});
   const resetCarRef = useRef<() => void>(() => {});
@@ -238,6 +259,46 @@ export function FreeDriveTrackHud({
     }
     return subscribeRaceTelemetry(handleRace);
   }, [raceMode, subscribeRaceTelemetry, raceTelemetryRef]);
+
+  // Solo Time Trial telemetry subscription (imperative 30Hz clock + milestone updates)
+  useEffect(() => {
+    if (!timeTrialMode || !subscribeTimeTrialTelemetry) {
+      prevTtHudRef.current = null;
+      setTtHud(null);
+      return;
+    }
+
+    minimapRef.current?.updateRivals([]);
+
+    const handleTimeTrial = (tt: TimeTrialTelemetry) => {
+      if (ttTimerRef.current) {
+        ttTimerRef.current.textContent = formatLapMs(
+          tt.phase === 'waiting-line' ? 0 : tt.currentLapMs,
+        );
+      }
+      const prev = prevTtHudRef.current;
+      const now = performance.now();
+      const bannerVisible = tt.lapCompleteBannerTimer > 0;
+      const prevBannerVisible = (prev?.lapCompleteBannerTimer ?? 0) > 0;
+      const importantTransition =
+        !prev ||
+        tt.phase !== prev.phase ||
+        tt.completedLaps !== prev.completedLaps ||
+        tt.sector !== prev.sector ||
+        bannerVisible !== prevBannerVisible;
+
+      if (importantTransition || now - ttThrottleRef.current > 240) {
+        ttThrottleRef.current = now;
+        prevTtHudRef.current = tt;
+        setTtHud(tt);
+      }
+    };
+
+    if (timeTrialTelemetryRef?.current) {
+      handleTimeTrial(timeTrialTelemetryRef.current);
+    }
+    return subscribeTimeTrialTelemetry(handleTimeTrial);
+  }, [timeTrialMode, subscribeTimeTrialTelemetry, timeTrialTelemetryRef]);
 
   const syncInputs = useCallback(() => {
     if (isPortrait) {
@@ -378,11 +439,15 @@ export function FreeDriveTrackHud({
       }
     };
 
+    const onWindowBlur = () => {
+      if (!document.hasFocus()) clearAllInputs();
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerup', onGlobalPointerRelease);
     window.addEventListener('pointercancel', onGlobalPointerRelease);
-    window.addEventListener('blur', clearAllInputs);
+    window.addEventListener('blur', onWindowBlur);
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
@@ -390,15 +455,57 @@ export function FreeDriveTrackHud({
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('pointerup', onGlobalPointerRelease);
       window.removeEventListener('pointercancel', onGlobalPointerRelease);
-      window.removeEventListener('blur', clearAllInputs);
+      window.removeEventListener('blur', onWindowBlur);
       document.removeEventListener('visibilitychange', onVisibility);
       clearAllInputs();
     };
   }, [isPortrait, syncInputs, clearAllInputs]);
 
+  const getSteerFromClientX = (clientX: number): 'steerLeft' | 'steerRight' => {
+    const pad = steerPadRef.current;
+    if (!pad) return 'steerLeft';
+    const rect = pad.getBoundingClientRect();
+    return clientX < rect.left + rect.width * 0.5 ? 'steerLeft' : 'steerRight';
+  };
+
+  const handleSteerPadDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore if capture is unavailable for synthetic events
+    }
+    const control = getSteerFromClientX(e.clientX);
+    activePointersRef.current.set(e.pointerId, control);
+    syncInputs();
+  };
+
+  const handleSteerPadMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activePointersRef.current.has(e.pointerId)) return;
+    e.preventDefault();
+    const nextControl = getSteerFromClientX(e.clientX);
+    if (activePointersRef.current.get(e.pointerId) !== nextControl) {
+      activePointersRef.current.set(e.pointerId, nextControl);
+      syncInputs();
+    }
+  };
+
+  const handleSteerPadRelease = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (activePointersRef.current.delete(e.pointerId)) {
+      syncInputs();
+    }
+  };
+
   const handleTouchDown =
     (control: ControlKey) => (e: ReactPointerEvent<HTMLButtonElement>) => {
       e.preventDefault();
+      e.stopPropagation();
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        // ignore if capture is unavailable
+      }
       activePointersRef.current.set(e.pointerId, control);
       syncInputs();
     };
@@ -439,7 +546,7 @@ export function FreeDriveTrackHud({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.16 }}
-      className="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between px-2.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pt-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))] overflow-hidden select-none"
+      className="fixed inset-0 z-20 pointer-events-none flex flex-col justify-between pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pt-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))] overflow-hidden select-none touch-none"
     >
       {/* Top HUD Bar */}
       <div className="shrink-0 flex items-center justify-between gap-1.5 sm:gap-2 pr-12 sm:pr-28">
@@ -547,15 +654,88 @@ export function FreeDriveTrackHud({
         </div>
       </div>
 
-      {/* Middle Zone: Upper-Left Minimap | Center Lights/Toasts | Upper-Right Race Tower */}
+      {/* Middle Zone: Upper-Left Career Standings + Minimap | Center Lights/Toasts | Upper-Right Race Tower */}
       <div className="flex-1 min-h-0 flex items-start justify-between pt-1.5 sm:pt-2 gap-2 relative">
-        <CircuitMinimap
-          ref={minimapRef}
-          circuitId={circuit.id}
-          circuitName={circuit.name}
-          initialTelemetry={telemetryRef.current}
-          accentHex={car.accentHex}
-        />
+        <div className="flex flex-row [@media(min-height:540px)]:flex-col items-start gap-1.5 sm:gap-2 h-full min-h-0 shrink-0">
+          {raceMode && isCareerRace && raceHud && raceHud.standings.length > 0 && (
+            <div
+              className="pointer-events-auto [@media(min-height:540px)]:order-2 [@media(min-height:540px)]:flex-1 min-h-0 w-[clamp(124px,16vw,166px)] max-h-full flex flex-col overflow-hidden rounded-xl bg-[#0e1620]/90 border border-white/14 shadow-[0_10px_28px_rgba(0,0,0,0.45)]"
+              aria-label={t.quickRace.towerTitle}
+            >
+              <div className="shrink-0 flex items-center justify-between px-2 py-1 bg-[#141f2d] border-b border-white/10 text-[9px] font-bold tracking-[0.14em] text-slate-300">
+                <span>{t.quickRace.towerTitle}</span>
+                <span className="text-[#7dd3fc]">{t.quickRace.intervalHeader}</span>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto flow-scroll divide-y divide-white/6">
+                {raceHud.standings.map((row, idx) => {
+                  const prevGap = idx > 0 ? raceHud.standings[idx - 1].gapSec : 0;
+                  const intervalSec = idx === 0 ? 0 : Math.max(0, row.gapSec - prevGap);
+                  const intervalLabel =
+                    idx === 0
+                      ? t.quickRace.leaderShort
+                      : intervalSec >= 10
+                        ? `+${intervalSec.toFixed(1)}s`
+                        : `+${intervalSec.toFixed(2)}s`;
+
+                  return (
+                    <div
+                      key={row.id}
+                      className={`flex items-center justify-between gap-1 px-1.5 py-[2px] sm:py-[3px] text-[10px] sm:text-[11px] leading-tight ${
+                        row.isPlayer
+                          ? 'bg-[#0b6884]/55 text-white font-bold'
+                          : 'text-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className={`font-mono-tabular w-3.5 text-right shrink-0 text-[9px] sm:text-[10px] ${
+                            idx === 0
+                              ? 'text-amber-300 font-extrabold'
+                              : row.isPlayer
+                                ? 'text-[#7dd3fc] font-extrabold'
+                                : 'text-slate-400'
+                          }`}
+                        >
+                          {row.position}
+                        </span>
+                        <span
+                          className="w-1 h-3 rounded-sm shrink-0"
+                          style={{ backgroundColor: row.colorHex }}
+                        />
+                        <span className="font-mono-tabular truncate tracking-wide">
+                          {row.code}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`font-mono-tabular text-[9px] sm:text-[10px] shrink-0 ${
+                          idx === 0
+                            ? 'text-amber-300 font-bold'
+                            : row.isPlayer
+                              ? 'text-[#bae6fd]'
+                              : 'text-slate-300'
+                        }`}
+                      >
+                        {intervalLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="[@media(min-height:540px)]:order-1 shrink-0">
+            <CircuitMinimap
+              ref={minimapRef}
+              circuitId={circuit.id}
+              circuitName={circuit.name}
+              initialTelemetry={telemetryRef.current}
+              accentHex={car.accentHex}
+            />
+          </div>
+        </div>
 
         {/* Center Top F1 5-Red-Light Countdown & Track Limits Notification */}
         {raceMode && raceHud && (
@@ -618,7 +798,64 @@ export function FreeDriveTrackHud({
           </div>
         )}
 
-        {/* Right Column: Compact F1 Race Telemetry Strip (keeps vertical height low) */}
+        {/* Center Top Time Trial Line-Crossing Prompt / Lap Completed Banner */}
+        {timeTrialMode && ttHud && (
+          <div className="flex flex-col items-center gap-1.5 mx-auto pt-0.5 shrink-0">
+            {ttHud.phase === 'waiting-line' && (
+              <div className="rounded-xl bg-[#101924]/92 border border-[#38bdf8]/45 px-4 sm:px-5 py-1.5 sm:py-2 shadow-[0_14px_36px_rgba(0,0,0,0.48)] flex flex-col items-center gap-0.5">
+                <span className="font-display text-[11px] sm:text-xs font-bold tracking-[0.18em] text-white">
+                  {t.timeTrial.waitingStartTitle}
+                </span>
+                <span className="text-[10px] sm:text-[11px] text-[#7dd3fc]">
+                  {t.timeTrial.waitingStartHint}
+                </span>
+              </div>
+            )}
+
+            {ttHud.lapCompleteBannerTimer > 0 && ttHud.lastLapMs !== null && (
+              <div
+                className={`rounded-xl border px-4 sm:px-6 py-1.5 sm:py-2 shadow-xl flex flex-col items-center gap-0.5 ${
+                  ttHud.isNewRecordBanner
+                    ? 'bg-emerald-950/92 border-emerald-400/70'
+                    : 'bg-[#101a26]/94 border-[#38bdf8]/55'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-display text-[10px] sm:text-xs font-bold tracking-[0.18em] text-slate-200">
+                    {t.timeTrial.lapCompleteTitle} · {t.timeTrial.lapLabel}{' '}
+                    {ttHud.completedLaps}
+                  </span>
+                  {ttHud.isNewRecordBanner && (
+                    <span className="font-display text-[10px] sm:text-xs font-extrabold tracking-[0.16em] text-emerald-300">
+                      {t.timeTrial.newRecordBadge}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-baseline gap-2.5">
+                  <span className="font-mono-tabular text-base sm:text-xl font-extrabold text-white">
+                    {formatLapMs(ttHud.lastLapMs)}
+                  </span>
+                  {ttHud.deltaToBestMs !== null && (
+                    <span
+                      className={`font-mono-tabular text-xs font-bold ${
+                        ttHud.deltaToBestMs <= 0
+                          ? 'text-emerald-300'
+                          : 'text-amber-300'
+                      }`}
+                    >
+                      {ttHud.deltaToBestMs <= 0
+                        ? `${(ttHud.deltaToBestMs / 1000).toFixed(2)}s`
+                        : `+${(ttHud.deltaToBestMs / 1000).toFixed(2)}s`}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right Column: Compact Race Telemetry OR Time Trial Stopwatch Card */}
         {raceMode && raceHud ? (
           <div className="rounded-xl bg-[#131d28]/90 border border-white/14 px-2.5 sm:px-3 py-1.5 sm:py-2 shadow-[0_10px_28px_rgba(0,0,0,0.4)] w-[clamp(132px,18vw,186px)] space-y-1 shrink-0">
             <div className="flex items-center justify-between gap-2">
@@ -676,49 +913,110 @@ export function FreeDriveTrackHud({
               </div>
             )}
           </div>
+        ) : timeTrialMode && ttHud ? (
+          <div className="rounded-xl bg-[#131d28]/90 border border-white/14 px-2.5 sm:px-3.5 py-2 shadow-[0_10px_28px_rgba(0,0,0,0.4)] w-[clamp(150px,20vw,210px)] space-y-1.5 shrink-0">
+            <div className="flex items-center justify-between gap-2 text-[10px]">
+              <span className="flex items-center gap-1 font-display font-bold tracking-[0.12em] text-[#7dd3fc]">
+                <Timer className="w-3 h-3" />
+                {ttHud.phase === 'waiting-line'
+                  ? t.timeTrial.outLapLabel
+                  : `${t.timeTrial.lapLabel} ${ttHud.lapNumber}`}
+              </span>
+              <span className="font-mono-tabular text-slate-400">
+                {t.timeTrial.sectorLabel}
+                {ttHud.sector}/3
+              </span>
+            </div>
+
+            <div className="border-t border-white/10 pt-1">
+              <div className="text-[9px] font-semibold tracking-wider text-slate-400">
+                {ttHud.phase === 'waiting-line'
+                  ? t.timeTrial.soloTag
+                  : t.timeTrial.timerRunningLabel}
+              </div>
+              <span
+                ref={ttTimerRef}
+                className={`block font-mono-tabular text-lg sm:text-xl font-extrabold leading-tight ${
+                  ttHud.phase === 'running' ? 'text-white' : 'text-slate-400'
+                }`}
+              >
+                {formatLapMs(
+                  ttHud.phase === 'waiting-line' ? 0 : ttHud.currentLapMs,
+                )}
+              </span>
+            </div>
+
+            {ttHud.lastLapMs !== null && (
+              <div className="flex items-center justify-between text-[10px] text-slate-300 border-t border-white/10 pt-1">
+                <span>{t.timeTrial.lastLapLabel}</span>
+                <span className="font-mono-tabular font-semibold text-white">
+                  {formatLapMs(ttHud.lastLapMs)}
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between text-[10px] text-slate-300">
+              <span>{t.timeTrial.bestLapLabel}</span>
+              <span className="font-mono-tabular font-semibold text-emerald-300">
+                {formatLapMs(ttHud.bestLapMs)}
+              </span>
+            </div>
+
+            {ttHud.circuitRecordMs !== null && (
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>{t.timeTrial.circuitRecordLabel}</span>
+                <span className="font-mono-tabular font-semibold text-[#7dd3fc]">
+                  {formatLapMs(ttHud.circuitRecordMs)}
+                </span>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="hidden sm:block w-[clamp(108px,15.5vw,166px)] shrink-0" aria-hidden="true" />
         )}
       </div>
 
       {/* Bottom Landscape Gameplay Zone: Left Steer | Center Telemetry | Right Pedals */}
-      <div className="shrink-0 flex items-end justify-between gap-2 sm:gap-4 w-full">
-        {/* Mobile Touch Steering (Left Side) */}
-        <div className="flex items-end">
+      <div className="shrink-0 flex items-end justify-between gap-2 sm:gap-4 w-full touch-none">
+        {/* Mobile Touch Steering (Left Side - Unified Multi-Touch Captured Zone, clear of left edge) */}
+        <div className="flex items-end pl-2 sm:pl-0">
           {showTouchControls && (
-            <div className="pointer-events-auto flex items-center gap-2 sm:gap-3">
+            <div
+              ref={steerPadRef}
+              onPointerDown={handleSteerPadDown}
+              onPointerMove={handleSteerPadMove}
+              onPointerUp={handleSteerPadRelease}
+              onPointerCancel={handleSteerPadRelease}
+              onLostPointerCapture={handleSteerPadRelease}
+              onContextMenu={(e) => e.preventDefault()}
+              role="group"
+              aria-label={`${t.trackHud.steerLeft} / ${t.trackHud.steerRight}`}
+              className="pointer-events-auto touch-none select-none flex items-center gap-1.5 sm:gap-2 p-1 rounded-2xl"
+            >
               <button
                 type="button"
                 aria-label={t.trackHud.steerLeft}
-                onPointerDown={handleTouchDown('steerLeft')}
-                onPointerUp={handleTouchRelease('steerLeft')}
-                onPointerCancel={handleTouchRelease('steerLeft')}
-                onLostPointerCapture={handleTouchRelease('steerLeft')}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`touch-none select-none flex items-center justify-center w-[clamp(56px,10.5vw,84px)] h-[clamp(54px,14dvh,80px)] rounded-2xl border shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-transform duration-75 ${
+                tabIndex={-1}
+                className={`pointer-events-none touch-none select-none flex items-center justify-center w-[clamp(64px,11.5vw,90px)] h-[clamp(58px,15dvh,84px)] rounded-2xl border shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-transform duration-75 ${
                   pressedUi.steerLeft
                     ? 'bg-[#0b6884] border-[#38bdf8] text-white scale-95'
-                    : 'bg-[#16212e]/90 border-white/18 text-white/95'
+                    : 'bg-[#16212e]/92 border-white/20 text-white/95'
                 }`}
               >
-                <ChevronLeft className="w-7 h-7 sm:w-9 sm:h-9" />
+                <ChevronLeft className="pointer-events-none w-7 h-7 sm:w-9 sm:h-9" />
               </button>
 
               <button
                 type="button"
                 aria-label={t.trackHud.steerRight}
-                onPointerDown={handleTouchDown('steerRight')}
-                onPointerUp={handleTouchRelease('steerRight')}
-                onPointerCancel={handleTouchRelease('steerRight')}
-                onLostPointerCapture={handleTouchRelease('steerRight')}
-                onContextMenu={(e) => e.preventDefault()}
-                className={`touch-none select-none flex items-center justify-center w-[clamp(56px,10.5vw,84px)] h-[clamp(54px,14dvh,80px)] rounded-2xl border shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-transform duration-75 ${
+                tabIndex={-1}
+                className={`pointer-events-none touch-none select-none flex items-center justify-center w-[clamp(64px,11.5vw,90px)] h-[clamp(58px,15dvh,84px)] rounded-2xl border shadow-[0_8px_24px_rgba(0,0,0,0.4)] transition-transform duration-75 ${
                   pressedUi.steerRight
                     ? 'bg-[#0b6884] border-[#38bdf8] text-white scale-95'
-                    : 'bg-[#16212e]/90 border-white/18 text-white/95'
+                    : 'bg-[#16212e]/92 border-white/20 text-white/95'
                 }`}
               >
-                <ChevronRight className="w-7 h-7 sm:w-9 sm:h-9" />
+                <ChevronRight className="pointer-events-none w-7 h-7 sm:w-9 sm:h-9" />
               </button>
             </div>
           )}
@@ -797,7 +1095,7 @@ export function FreeDriveTrackHud({
                     : 'bg-[#1a222d]/90 border-rose-400/35 text-rose-100'
                 }`}
               >
-                <span className="font-display text-[11px] sm:text-xs font-bold tracking-[0.12em]">
+                <span className="pointer-events-none font-display text-[11px] sm:text-xs font-bold tracking-[0.12em]">
                   {t.trackHud.brake}
                 </span>
               </button>
@@ -816,7 +1114,7 @@ export function FreeDriveTrackHud({
                     : 'bg-[#152535]/92 border-[#38bdf8]/45 text-white'
                 }`}
               >
-                <span className="font-display text-xs sm:text-sm font-bold tracking-[0.14em]">
+                <span className="pointer-events-none font-display text-xs sm:text-sm font-bold tracking-[0.14em]">
                   {t.trackHud.throttle}
                 </span>
               </button>
@@ -863,6 +1161,12 @@ export function FreeDriveTrackHud({
                 <span className="font-mono-tabular font-extrabold text-[#7dd3fc] text-sm">
                   +{careerResultSummary.pointsEarned} {t.career.entry.pointsShort}
                 </span>
+                {careerResultSummary.championshipTitleId && (
+                  <p className="w-full text-[11px] font-bold text-amber-300">
+                    {t.career.hub.championshipUnlockedBanner}:{' '}
+                    {t.victory.titles[careerResultSummary.championshipTitleId]}
+                  </p>
+                )}
                 {careerResultSummary.unlockedTiers.length > 0 && (
                   <p className="w-full text-[11px] font-semibold text-emerald-300">
                     {t.career.hub.tierUnlockedBanner}:{' '}

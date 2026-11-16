@@ -15,6 +15,7 @@ jobs:
   build-apk:
     name: Build FLOW RACING APK
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -31,19 +32,57 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK Platform 36 & Build Tools
+      - name: Configure Android SDK
         run: |
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "${SDK_ROOT}/licenses"
 
-      - name: Set up Gradle Cache
-        uses: gradle/actions/setup-gradle@v4
+          # Pre-accept Android SDK licenses non-interactively
+          printf '24333f8a63b6825ea9c5514f83c2829b004d1fee\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n' > "${SDK_ROOT}/licenses/android-sdk-license"
+          printf '84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n' > "${SDK_ROOT}/licenses/android-sdk-preview-license"
+
+          SDKMANAGER=""
+          for candidate in \
+            "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" \
+            "${SDK_ROOT}/cmdline-tools/"*/bin/sdkmanager \
+            "${SDK_ROOT}/tools/bin/sdkmanager"; do
+            if [ -x "$candidate" ]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            mkdir -p "${SDK_ROOT}/cmdline-tools"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-extract
+            rm -rf "${SDK_ROOT}/cmdline-tools/latest"
+            mv /tmp/cmdline-extract/cmdline-tools "${SDK_ROOT}/cmdline-tools/latest"
+            rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-extract
+            SDKMANAGER="${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          if [ ! -d "${SDK_ROOT}/platforms/android-36" ] || [ ! -d "${SDK_ROOT}/build-tools/36.0.0" ]; then
+            "$SDKMANAGER" --sdk_root="${SDK_ROOT}" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools" < /dev/null
+          fi
+
+          echo "ANDROID_HOME=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "$GITHUB_ENV"
+          echo "sdk.dir=${SDK_ROOT}" > android/local.properties
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
       - name: Install npm dependencies
-        run: npm install --no-audit --no-fund
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Type-check and build web bundle
         run: |
@@ -54,10 +93,12 @@ jobs:
         run: npx cap sync android
 
       - name: Build installable Android APK
+        env:
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m
         run: |
           chmod +x android/gradlew
           cd android
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --max-workers=2 --stacktrace
 
       - name: Prepare APK artifact
         run: |

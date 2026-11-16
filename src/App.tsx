@@ -16,8 +16,13 @@ import { GpCutsceneOverlay } from './components/GpCutsceneOverlay';
 import { HomeOverlay } from './components/HomeOverlay';
 import { PlayModePanel } from './components/PlayModePanel';
 import { ExitedScreen, QuitModal } from './components/QuitModal';
+import {
+  ReplayArchiveFilter,
+  ReplayArchiveOverlay,
+} from './components/ReplayArchiveOverlay';
 import { ReplayHud } from './components/ReplayHud';
 import { SettingsPanel } from './components/SettingsPanel';
+import { VictoryCutsceneOverlay } from './components/VictoryCutsceneOverlay';
 import {
   CareerSaveState,
   clearCareerSave,
@@ -28,12 +33,18 @@ import {
   startNextCareerSeason,
 } from './data/careerStorage';
 import { OfficialTeamId, TeamTier } from './data/grid2026';
+import {
+  listSavedReplays,
+  MIN_ARCHIVE_FRAMES,
+  saveReplayRecording,
+} from './data/replayStorage';
 import { TRANSLATIONS } from './i18n/translations';
 import { DrivingInput } from './physics/formulaPhysics';
 import { ReplayControlBridge, ReplayRecording } from './physics/raceReplay';
 import {
   CarCustomization,
   CareerCharacter,
+  ChampionshipTitleId,
   CIRCUIT_OPTIONS,
   CutsceneStatusSnapshot,
   DrivingTelemetry,
@@ -44,7 +55,11 @@ import {
   RaceMinimapCar,
   RaceTelemetry,
   ReplayPlaybackState,
+  resolveCarLivery,
+  TimeTrialTelemetry,
   TrackCameraMode,
+  VictoryContext,
+  VictoryStatusSnapshot,
   WeatherStatusSnapshot,
 } from './types/menu';
 
@@ -143,6 +158,7 @@ export default function App() {
     totalRounds: number;
     pointsEarned: number;
     unlockedTiers: TeamTier[];
+    championshipTitleId?: ChampionshipTitleId | null;
   } | null>(null);
   const careerRaceSubmittedRef = useRef(false);
   const nonCareerCustomizationRef = useRef<CarCustomization>(customization);
@@ -150,6 +166,24 @@ export default function App() {
   careerSaveRef.current = careerSave;
   const activeCareerSessionRef = useRef(activeCareerSession);
   activeCareerSessionRef.current = activeCareerSession;
+
+  const [victoryContext, setVictoryContext] = useState<VictoryContext | null>(null);
+  const [victoryStatus, setVictoryStatus] = useState<VictoryStatusSnapshot>({
+    type: 'race-win',
+    beat: 'finish-cross',
+    progress: 0,
+  });
+  const handleVictoryStatusUpdate = useCallback((next: VictoryStatusSnapshot) => {
+    setVictoryStatus(next);
+  }, []);
+  const triggeredVictoryRunIdsRef = useRef<Set<number>>(new Set());
+  const triggeredChampionshipSeasonsRef = useRef<Set<number>>(new Set());
+  const screenRef = useRef<MenuScreen>(screen);
+  screenRef.current = screen;
+  const customizationRef = useRef<CarCustomization>(customization);
+  customizationRef.current = customization;
+  const freeDriveConfigRef = useRef<FreeDriveConfig>(freeDriveConfig);
+  freeDriveConfigRef.current = freeDriveConfig;
 
   const raceTelemetryRef = useRef<RaceTelemetry | null>(null);
   const raceListenersRef = useRef<Set<(tel: RaceTelemetry) => void>>(new Set());
@@ -159,6 +193,15 @@ export default function App() {
 
     const careerCtx = activeCareerSessionRef.current;
     const currentSave = careerSaveRef.current;
+    let careerOutcome: {
+      gpName: string;
+      seasonYear: number;
+      isSeasonCompleted: boolean;
+      championshipTitleId: ChampionshipTitleId | null;
+      seasonTotalPoints: number;
+      seasonWins: number;
+    } | null = null;
+
     if (
       next.phase === 'finished' &&
       careerCtx?.mode === 'race' &&
@@ -166,16 +209,88 @@ export default function App() {
       !careerRaceSubmittedRef.current
     ) {
       careerRaceSubmittedRef.current = true;
-      const { nextSave, playerPointsEarned, newlyUnlockedTiers } =
-        recordCareerRaceResult(currentSave, careerCtx.roundIndex, next.standings);
-      saveCareerState(nextSave);
-      setCareerSave(nextSave);
+      const result = recordCareerRaceResult(
+        currentSave,
+        careerCtx.roundIndex,
+        next.standings,
+      );
+      saveCareerState(result.nextSave);
+      setCareerSave(result.nextSave);
       setCareerResultSummary({
         roundNumber: careerCtx.roundIndex + 1,
-        totalRounds: nextSave.calendar.length,
-        pointsEarned: playerPointsEarned,
-        unlockedTiers: newlyUnlockedTiers,
+        totalRounds: result.nextSave.calendar.length,
+        pointsEarned: result.playerPointsEarned,
+        unlockedTiers: result.newlyUnlockedTiers,
+        championshipTitleId: result.championshipTitleId,
       });
+      careerOutcome = {
+        gpName: currentSave.calendar[careerCtx.roundIndex]?.gpName ?? 'Grand Prix',
+        seasonYear: currentSave.seasonYear,
+        isSeasonCompleted: result.isSeasonCompleted,
+        championshipTitleId: result.championshipTitleId,
+        seasonTotalPoints: result.seasonTotalPoints,
+        seasonWins: result.seasonWins,
+      };
+    }
+
+    if (
+      next.phase === 'finished' &&
+      screenRef.current === 'quick-race-track' &&
+      !triggeredVictoryRunIdsRef.current.has(next.runId)
+    ) {
+      const playerEntry = next.standings.find((s) => s.isPlayer);
+      const wonChampionship = Boolean(
+        careerOutcome?.isSeasonCompleted &&
+          careerOutcome?.championshipTitleId &&
+          !triggeredChampionshipSeasonsRef.current.has(careerOutcome.seasonYear),
+      );
+      const wonRace = playerEntry?.position === 1;
+
+      if (wonChampionship || wonRace) {
+        triggeredVictoryRunIdsRef.current.add(next.runId);
+        if (wonChampionship && careerOutcome) {
+          triggeredChampionshipSeasonsRef.current.add(careerOutcome.seasonYear);
+        }
+
+        const isChampionship = wonChampionship;
+        const livery = resolveCarLivery(customizationRef.current);
+        const circuit =
+          CIRCUIT_OPTIONS.find(
+            (c) => c.id === freeDriveConfigRef.current.circuitId,
+          ) ?? CIRCUIT_OPTIONS[0];
+
+        drivingInputRef.current = {
+          throttle: false,
+          brake: false,
+          steerLeft: false,
+          steerRight: false,
+        };
+
+        setVictoryContext({
+          runId: next.runId,
+          type: isChampionship ? 'championship-win' : 'race-win',
+          driverName: livery.driverName,
+          driverCode: livery.driverCode,
+          driverNumber: livery.number,
+          teamName: livery.name,
+          teamColorHex: livery.primaryHex,
+          position: playerEntry?.position ?? 1,
+          raceName: careerOutcome?.gpName ?? circuit.name,
+          raceTimeMs: playerEntry?.finishTimeMs ?? null,
+          isCareer: Boolean(careerOutcome),
+          seasonYear: careerOutcome?.seasonYear,
+          championshipTitleId: careerOutcome?.championshipTitleId ?? undefined,
+          totalPoints: careerOutcome?.seasonTotalPoints,
+          winsCount: careerOutcome?.seasonWins,
+        });
+        setVictoryStatus({
+          type: isChampionship ? 'championship-win' : 'race-win',
+          beat: isChampionship ? 'parc-ferme-arrival' : 'finish-cross',
+          progress: 0,
+        });
+        ambientAudio.startVictoryAudio(isChampionship);
+        setScreen('victory-cutscene');
+      }
     }
   }, []);
   const subscribeRaceTelemetry = useCallback(
@@ -183,6 +298,27 @@ export default function App() {
       raceListenersRef.current.add(listener);
       return () => {
         raceListenersRef.current.delete(listener);
+      };
+    },
+    [],
+  );
+
+  const timeTrialTelemetryRef = useRef<TimeTrialTelemetry | null>(null);
+  const timeTrialListenersRef = useRef<Set<(tel: TimeTrialTelemetry) => void>>(
+    new Set(),
+  );
+  const handleTimeTrialTelemetryUpdate = useCallback(
+    (next: TimeTrialTelemetry) => {
+      timeTrialTelemetryRef.current = next;
+      timeTrialListenersRef.current.forEach((fn) => fn(next));
+    },
+    [],
+  );
+  const subscribeTimeTrialTelemetry = useCallback(
+    (listener: (tel: TimeTrialTelemetry) => void) => {
+      timeTrialListenersRef.current.add(listener);
+      return () => {
+        timeTrialListenersRef.current.delete(listener);
       };
     },
     [],
@@ -202,6 +338,28 @@ export default function App() {
   const [hasLastReplay, setHasLastReplay] = useState(false);
   const [canReplayCurrentSession, setCanReplayCurrentSession] = useState(false);
   const replayReturnScreenRef = useRef<MenuScreen>('free-drive');
+  const [replayArchiveFilter, setReplayArchiveFilter] =
+    useState<ReplayArchiveFilter | null>(null);
+  const [replayArchiveCounts, setReplayArchiveCounts] = useState({
+    freeDrive: 0,
+    timeTrial: 0,
+    career: 0,
+    total: 0,
+  });
+
+  const refreshReplayArchiveCounts = useCallback(async () => {
+    const items = await listSavedReplays('all');
+    setReplayArchiveCounts({
+      freeDrive: items.filter((item) => item.category === 'free-drive').length,
+      timeTrial: items.filter((item) => item.category === 'time-trial').length,
+      career: items.filter((item) => item.category === 'career').length,
+      total: items.length,
+    });
+  }, []);
+
+  useEffect(() => {
+    void refreshReplayArchiveCounts();
+  }, [refreshReplayArchiveCounts]);
 
   const replayControlRef = useRef<ReplayControlBridge>({
     playing: true,
@@ -259,11 +417,40 @@ export default function App() {
     [],
   );
 
-  const handleReplayAvailable = useCallback((recording: ReplayRecording) => {
-    latestReplayRef.current = recording;
-    setHasLastReplay(true);
-    setCanReplayCurrentSession(true);
-  }, []);
+  const handleReplayAvailable = useCallback(
+    (recording: ReplayRecording) => {
+      const careerCtx = activeCareerSessionRef.current;
+      const save = careerSaveRef.current;
+      if (!recording.category) {
+        if (careerCtx && save) {
+          const round = save.calendar[careerCtx.roundIndex];
+          recording.category = 'career';
+          recording.careerMeta = {
+            seasonYear: save.seasonYear,
+            roundNumber: careerCtx.roundIndex + 1,
+            gpName: round?.gpName ?? recording.circuitName,
+            isPractice: careerCtx.mode === 'practice',
+          };
+        } else if (recording.mode === 'time-trial') {
+          recording.category = 'time-trial';
+        } else if (recording.mode === 'free-drive') {
+          recording.category = 'free-drive';
+        } else {
+          recording.category = 'quick-race';
+        }
+      }
+      latestReplayRef.current = recording;
+      setHasLastReplay(true);
+      setCanReplayCurrentSession(true);
+
+      if (recording.frames.length >= MIN_ARCHIVE_FRAMES) {
+        void saveReplayRecording(recording).then(() => {
+          void refreshReplayArchiveCounts();
+        });
+      }
+    },
+    [refreshReplayArchiveCounts],
+  );
 
   const [settings, setSettings] = useState<GameSettings>({
     atmosphere: 'coastal-mist',
@@ -330,6 +517,18 @@ export default function App() {
         return;
       }
 
+      if (screen === 'victory-cutscene') {
+        if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          handleSkipVictoryCutscene();
+        }
+        return;
+      }
+
+      if (replayArchiveFilter !== null) {
+        return;
+      }
+
       if (
         e.key === 'Escape' &&
         screen !== 'home' &&
@@ -359,6 +558,8 @@ export default function App() {
           } else {
             setScreen('quick-race');
           }
+        } else if (screen === 'time-trial-track') {
+          handleNavigate('time-trial');
         } else {
           handleNavigate('home');
         }
@@ -366,7 +567,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [screen, careerStep]);
+  }, [screen, careerStep, replayArchiveFilter]);
 
   useEffect(() => {
     ambientAudio.setVolume(settings.masterVolume);
@@ -381,10 +582,13 @@ export default function App() {
 
   const handleNavigate = (next: MenuScreen) => {
     ambientAudio.playUiClick();
+    ambientAudio.stopVictoryAudio();
+    setReplayArchiveFilter(null);
     if (
       next === 'garage' ||
       next === 'free-drive' ||
       next === 'quick-race' ||
+      next === 'time-trial' ||
       next === 'career'
     ) {
       setGaragePreset('hero');
@@ -409,7 +613,8 @@ export default function App() {
       next === 'play' ||
       next === 'garage' ||
       next === 'free-drive' ||
-      next === 'quick-race'
+      next === 'quick-race' ||
+      next === 'time-trial'
     ) {
       setActiveCareerSession(null);
       setCareerResultSummary(null);
@@ -417,7 +622,11 @@ export default function App() {
         prev.customDriver ? nonCareerCustomizationRef.current : prev,
       );
     }
-    if (next !== 'free-drive-track' && next !== 'quick-race-track') {
+    if (
+      next !== 'free-drive-track' &&
+      next !== 'quick-race-track' &&
+      next !== 'time-trial-track'
+    ) {
       drivingInputRef.current = {
         throttle: false,
         brake: false,
@@ -425,6 +634,7 @@ export default function App() {
         steerRight: false,
       };
       raceTelemetryRef.current = null;
+      timeTrialTelemetryRef.current = null;
       handleTelemetryUpdate(INITIAL_TELEMETRY);
     }
     setScreen(next);
@@ -432,6 +642,8 @@ export default function App() {
 
   const handleReturnToCareerHub = () => {
     ambientAudio.playUiClick();
+    ambientAudio.stopVictoryAudio();
+    setReplayArchiveFilter(null);
     setActiveCareerSession(null);
     setCareerResultSummary(null);
     drivingInputRef.current = {
@@ -441,9 +653,10 @@ export default function App() {
       steerRight: false,
     };
     raceTelemetryRef.current = null;
+    timeTrialTelemetryRef.current = null;
     handleTelemetryUpdate(INITIAL_TELEMETRY);
     setGaragePreset('hero');
-    setCareerStep('hub');
+    setCareerStep(careerSaveRef.current ? 'hub' : 'entry');
     if (careerSaveRef.current) {
       const save = careerSaveRef.current;
       setCustomization((prev) => ({
@@ -459,12 +672,18 @@ export default function App() {
   const startingDriveRef = useRef(false);
 
   const launchTrackScreen = (
-    target: 'free-drive-track' | 'quick-race-track' | 'gp-cutscene',
+    target:
+      | 'free-drive-track'
+      | 'quick-race-track'
+      | 'time-trial-track'
+      | 'gp-cutscene',
   ) => {
     if (startingDriveRef.current) return;
     startingDriveRef.current = true;
     ambientAudio.playUiClick();
+    setReplayArchiveFilter(null);
     setCanReplayCurrentSession(false);
+    timeTrialTelemetryRef.current = null;
     handleTelemetryUpdate(INITIAL_TELEMETRY);
     if (target === 'gp-cutscene') {
       setCutsceneStatus({ beat: 'pit-prep', progress: 0 });
@@ -490,8 +709,20 @@ export default function App() {
     setScreen((prev) => (prev === 'gp-cutscene' ? 'quick-race-track' : prev));
   }, []);
 
+  const handleCompleteVictoryCutscene = useCallback(() => {
+    ambientAudio.stopVictoryAudio();
+    setScreen((prev) => (prev === 'victory-cutscene' ? 'quick-race-track' : prev));
+  }, []);
+
+  const handleSkipVictoryCutscene = useCallback(() => {
+    ambientAudio.playUiClick();
+    ambientAudio.stopVictoryAudio();
+    setScreen((prev) => (prev === 'victory-cutscene' ? 'quick-race-track' : prev));
+  }, []);
+
   const handleStartDrive = () => launchTrackScreen('free-drive-track');
   const handleStartQuickRace = () => launchTrackScreen('gp-cutscene');
+  const handleStartTimeTrial = () => launchTrackScreen('time-trial-track');
 
   const handleStartCareerRace = () => {
     if (!careerSave) return;
@@ -575,7 +806,9 @@ export default function App() {
 
   const handleDeleteCareer = () => {
     ambientAudio.playUiClick();
+    ambientAudio.stopVictoryAudio();
     clearCareerSave();
+    triggeredChampionshipSeasonsRef.current.clear();
     setCareerSave(null);
     setActiveCareerSession(null);
     setCareerResultSummary(null);
@@ -589,84 +822,122 @@ export default function App() {
     handleTelemetryUpdate(INITIAL_TELEMETRY);
   };
 
-  const handleOpenReplay = useCallback((returnTo?: MenuScreen) => {
-    const rec = latestReplayRef.current;
-    if (!rec || rec.frames.length < 2 || startingDriveRef.current) return;
-    startingDriveRef.current = true;
-    ambientAudio.playUiClick();
+  const launchReplaySession = useCallback(
+    (rec: ReplayRecording, returnTo?: MenuScreen) => {
+      if (rec.frames.length < 2 || startingDriveRef.current) return;
+      startingDriveRef.current = true;
+      ambientAudio.playUiClick();
+      setReplayArchiveFilter(null);
 
-    const snapshot: ReplayRecording = {
-      ...rec,
-      frames: rec.frames.slice(),
-    };
-    const firstFrame = snapshot.frames[0];
-    replayReturnScreenRef.current =
-      returnTo ??
-      (snapshot.mode === 'quick-race' ? 'quick-race' : 'free-drive');
+      const snapshot: ReplayRecording = {
+        ...rec,
+        frames: rec.frames.slice(),
+      };
+      const firstFrame = snapshot.frames[0];
+      replayReturnScreenRef.current =
+        returnTo ??
+        (snapshot.category === 'career'
+          ? 'career'
+          : snapshot.mode === 'quick-race'
+            ? 'quick-race'
+            : snapshot.mode === 'time-trial'
+              ? 'time-trial'
+              : 'free-drive');
 
-    drivingInputRef.current = {
-      throttle: false,
-      brake: false,
-      steerLeft: false,
-      steerRight: false,
-    };
+      drivingInputRef.current = {
+        throttle: false,
+        brake: false,
+        steerLeft: false,
+        steerRight: false,
+      };
 
-    replayControlRef.current = {
-      playing: true,
-      currentTimeSec: 0,
-      speedMultiplier: 1,
-      cameraMode: 'tv-broadcast',
-      snapCamera: true,
-    };
-    const initialPlayback: ReplayPlaybackState = {
-      playing: true,
-      currentTimeSec: 0,
-      durationSec: snapshot.durationSec,
-      speedMultiplier: 1,
-      cameraMode: 'tv-broadcast',
-      speedKmh: Math.round(firstFrame.speedKmh),
-      gear:
-        firstFrame.gearIndex === -1
-          ? 'R'
-          : firstFrame.gearIndex === 0
-            ? 'N'
-            : String(firstFrame.gearIndex),
-      rpmRatio: firstFrame.rpmRatio,
-      lap: firstFrame.lap,
-      totalLaps: snapshot.totalLaps,
-      position: firstFrame.position,
-    };
-    handleReplayPlaybackUpdate(initialPlayback);
-    handleReplayRivalsUpdate(
-      snapshot.aiRoster.map((meta, idx) => ({
-        id: meta.id,
-        x: firstFrame.ai[idx]?.x ?? 0,
-        z: firstFrame.ai[idx]?.z ?? 0,
-        colorHex: meta.colorHex,
-      })),
-    );
-    handleTelemetryUpdate({
-      speedKmh: Math.round(firstFrame.speedKmh),
-      gear: initialPlayback.gear,
-      rpmRatio: firstFrame.rpmRatio,
-      surface: firstFrame.surface,
-      isSliding: firstFrame.slipIntensity > 0.25,
-      steeringAngle: firstFrame.steerAngle,
-      x: firstFrame.x,
-      z: firstFrame.z,
-      yaw: firstFrame.yaw,
-    });
+      replayControlRef.current = {
+        playing: true,
+        currentTimeSec: 0,
+        speedMultiplier: 1,
+        cameraMode: 'tv-broadcast',
+        snapCamera: true,
+      };
+      const initialPlayback: ReplayPlaybackState = {
+        playing: true,
+        currentTimeSec: 0,
+        durationSec: snapshot.durationSec,
+        speedMultiplier: 1,
+        cameraMode: 'tv-broadcast',
+        speedKmh: Math.round(firstFrame.speedKmh),
+        gear:
+          firstFrame.gearIndex === -1
+            ? 'R'
+            : firstFrame.gearIndex === 0
+              ? 'N'
+              : String(firstFrame.gearIndex),
+        rpmRatio: firstFrame.rpmRatio,
+        lap: firstFrame.lap,
+        totalLaps: snapshot.totalLaps,
+        position: firstFrame.position,
+      };
+      handleReplayPlaybackUpdate(initialPlayback);
+      handleReplayRivalsUpdate(
+        snapshot.aiRoster.map((meta, idx) => ({
+          id: meta.id,
+          x: firstFrame.ai[idx]?.x ?? 0,
+          z: firstFrame.ai[idx]?.z ?? 0,
+          colorHex: meta.colorHex,
+        })),
+      );
+      handleTelemetryUpdate({
+        speedKmh: Math.round(firstFrame.speedKmh),
+        gear: initialPlayback.gear,
+        rpmRatio: firstFrame.rpmRatio,
+        surface: firstFrame.surface,
+        isSliding: firstFrame.slipIntensity > 0.25,
+        steeringAngle: firstFrame.steerAngle,
+        x: firstFrame.x,
+        z: firstFrame.z,
+        yaw: firstFrame.yaw,
+      });
 
-    setReplaySession(snapshot);
-    setIsCinematicFade(true);
-    window.setTimeout(() => {
-      setScreen('replay');
+      setReplaySession(snapshot);
+      setIsCinematicFade(true);
       window.setTimeout(() => {
-        setIsCinematicFade(false);
-        startingDriveRef.current = false;
-      }, 150);
-    }, 120);
-  }, [handleReplayPlaybackUpdate, handleReplayRivalsUpdate, handleTelemetryUpdate]);
+        setScreen('replay');
+        window.setTimeout(() => {
+          setIsCinematicFade(false);
+          startingDriveRef.current = false;
+        }, 150);
+      }, 120);
+    },
+    [handleReplayPlaybackUpdate, handleReplayRivalsUpdate, handleTelemetryUpdate],
+  );
+
+  const handleOpenReplay = useCallback(
+    (returnTo?: MenuScreen) => {
+      const rec = latestReplayRef.current;
+      if (!rec) return;
+      if (rec.frames.length >= MIN_ARCHIVE_FRAMES) {
+        void saveReplayRecording(rec).then(() => {
+          void refreshReplayArchiveCounts();
+        });
+      }
+      launchReplaySession(rec, returnTo);
+    },
+    [launchReplaySession, refreshReplayArchiveCounts],
+  );
+
+  const handleSelectArchivedReplay = useCallback(
+    (recording: ReplayRecording) => {
+      const returnTo: MenuScreen =
+        screenRef.current === 'career'
+          ? 'career'
+          : screenRef.current === 'quick-race'
+            ? 'quick-race'
+            : screenRef.current === 'time-trial'
+              ? 'time-trial'
+              : 'free-drive';
+      launchReplaySession(recording, returnTo);
+    },
+    [launchReplaySession],
+  );
 
   const handleExitReplay = useCallback(() => {
     if (replayReturnScreenRef.current === 'career') {
@@ -715,11 +986,15 @@ export default function App() {
         careerRoundSeed={activeCareerSession ? activeCareerSession.roundIndex : 0}
         replayRecording={replaySession}
         replayControlRef={replayControlRef}
+        victoryContext={victoryContext}
         onTelemetryUpdate={handleTelemetryUpdate}
         onRaceTelemetryUpdate={handleRaceTelemetryUpdate}
+        onTimeTrialTelemetryUpdate={handleTimeTrialTelemetryUpdate}
         onWeatherStatusUpdate={handleWeatherStatusUpdate}
         onCutsceneStatusUpdate={handleCutsceneStatusUpdate}
         onCutsceneComplete={handleCompleteCutscene}
+        onVictoryStatusUpdate={handleVictoryStatusUpdate}
+        onVictoryComplete={handleCompleteVictoryCutscene}
         onReplayAvailable={handleReplayAvailable}
         onReplayPlaybackUpdate={handleReplayPlaybackUpdate}
         onReplayRivalsUpdate={handleReplayRivalsUpdate}
@@ -777,12 +1052,14 @@ export default function App() {
           />
         )}
 
-        {(screen === 'free-drive' || screen === 'quick-race') && (
+        {(screen === 'free-drive' ||
+          screen === 'quick-race' ||
+          screen === 'time-trial') && (
           <FreeDriveSetupPanel
             key={screen}
             t={t}
             lang={settings.language}
-            mode={screen === 'quick-race' ? 'quick-race' : 'free-drive'}
+            mode={screen}
             customization={customization}
             config={freeDriveConfig}
             cameraPreset={garagePreset}
@@ -799,10 +1076,31 @@ export default function App() {
               setGaragePreset(preset);
             }}
             onStartDrive={
-              screen === 'quick-race' ? handleStartQuickRace : handleStartDrive
+              screen === 'quick-race'
+                ? handleStartQuickRace
+                : screen === 'time-trial'
+                  ? handleStartTimeTrial
+                  : handleStartDrive
             }
             hasLastReplay={hasLastReplay}
             onWatchLastReplay={() => handleOpenReplay(screen)}
+            savedReplaysCount={
+              screen === 'quick-race'
+                ? replayArchiveCounts.total
+                : screen === 'time-trial'
+                  ? replayArchiveCounts.timeTrial
+                  : replayArchiveCounts.freeDrive
+            }
+            onOpenReplayArchive={() => {
+              ambientAudio.playUiClick();
+              setReplayArchiveFilter(
+                screen === 'quick-race'
+                  ? 'all'
+                  : screen === 'time-trial'
+                    ? 'time-trial'
+                    : 'free-drive',
+              );
+            }}
             onBack={() => handleNavigate('play')}
           />
         )}
@@ -828,12 +1126,26 @@ export default function App() {
           />
         )}
 
-        {(screen === 'free-drive-track' || screen === 'quick-race-track') && (
+        {screen === 'victory-cutscene' && victoryContext && (
+          <VictoryCutsceneOverlay
+            key="victory-cutscene"
+            t={t}
+            victoryContext={victoryContext}
+            victoryStatus={victoryStatus}
+            onSkip={handleSkipVictoryCutscene}
+          />
+        )}
+
+        {(screen === 'free-drive-track' ||
+          screen === 'quick-race-track' ||
+          screen === 'time-trial-track') && (
           <FreeDriveTrackHud
             key={screen}
             t={t}
             lang={settings.language}
             raceMode={screen === 'quick-race-track'}
+            timeTrialMode={screen === 'time-trial-track'}
+            isCareerRace={activeCareerSession?.mode === 'race'}
             liveryId={customization.livery}
             driverId={customization.driverId}
             customDriver={customization.customDriver}
@@ -846,6 +1158,8 @@ export default function App() {
             subscribeTelemetry={subscribeTelemetry}
             raceTelemetryRef={raceTelemetryRef}
             subscribeRaceTelemetry={subscribeRaceTelemetry}
+            timeTrialTelemetryRef={timeTrialTelemetryRef}
+            subscribeTimeTrialTelemetry={subscribeTimeTrialTelemetry}
             isPortrait={isPortraitViewport}
             canWatchReplay={canReplayCurrentSession}
             onChangeCamera={(cam) => {
@@ -863,7 +1177,9 @@ export default function App() {
                   ? 'career'
                   : screen === 'quick-race-track'
                     ? 'quick-race'
-                    : 'free-drive',
+                    : screen === 'time-trial-track'
+                      ? 'time-trial'
+                      : 'free-drive',
               )
             }
             onBackToCareerHub={
@@ -871,7 +1187,11 @@ export default function App() {
             }
             onBackToSetup={() =>
               handleNavigate(
-                screen === 'quick-race-track' ? 'quick-race' : 'free-drive',
+                screen === 'quick-race-track'
+                  ? 'quick-race'
+                  : screen === 'time-trial-track'
+                    ? 'time-trial'
+                    : 'free-drive',
               )
             }
             onExitToMenu={() => handleNavigate('home')}
@@ -913,6 +1233,11 @@ export default function App() {
             onDeleteCareer={handleDeleteCareer}
             onStartCareerRace={handleStartCareerRace}
             onStartCareerPractice={handleStartCareerPractice}
+            savedReplaysCount={replayArchiveCounts.career}
+            onOpenReplayArchive={() => {
+              ambientAudio.playUiClick();
+              setReplayArchiveFilter('career');
+            }}
             onBackToHome={() => handleNavigate('home')}
           />
         )}
@@ -926,6 +1251,8 @@ export default function App() {
             onStartDrive={handleStartDrive}
             onOpenQuickRace={() => handleNavigate('quick-race')}
             onStartQuickRace={handleStartQuickRace}
+            onOpenTimeTrial={() => handleNavigate('time-trial')}
+            onStartTimeTrial={handleStartTimeTrial}
             onOpenCareer={() => handleNavigate('career')}
             hasLastReplay={hasLastReplay}
             onWatchLastReplay={() => handleOpenReplay('play')}
@@ -963,6 +1290,27 @@ export default function App() {
             onBack={() => handleNavigate('home')}
           />
         )}
+
+        {replayArchiveFilter !== null &&
+          (screen === 'free-drive' ||
+            screen === 'quick-race' ||
+            screen === 'time-trial' ||
+            screen === 'career') && (
+            <ReplayArchiveOverlay
+              key="replay-archive"
+              t={t}
+              lang={settings.language}
+              initialFilter={replayArchiveFilter}
+              onSelectReplay={handleSelectArchivedReplay}
+              onArchiveChanged={() => {
+                void refreshReplayArchiveCounts();
+              }}
+              onClose={() => {
+                ambientAudio.playUiClick();
+                setReplayArchiveFilter(null);
+              }}
+            />
+          )}
       </AnimatePresence>
 
       {/* Cinematic Fade Curtain for START DRIVE transition */}
@@ -1002,7 +1350,9 @@ export default function App() {
         !portraitDismissed &&
         screen !== 'free-drive-track' &&
         screen !== 'gp-cutscene' &&
+        screen !== 'victory-cutscene' &&
         screen !== 'quick-race-track' &&
+        screen !== 'time-trial-track' &&
         screen !== 'replay' && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0b121a]/92 p-6">
           <div className="max-w-xs text-center rounded-2xl bg-[#15202c] border border-white/14 p-6 shadow-2xl">

@@ -219,7 +219,220 @@ class AmbientAudioEngine {
     osc.stop(now + dur + 0.01);
   }
 
+  private victoryTimer: number | null = null;
+  private victoryCrowdGain: GainNode | null = null;
+  private victoryCrowdSource: AudioBufferSourceNode | null = null;
+  private victoryAnthemGain: GainNode | null = null;
+
+  public startVictoryAudio(isChampionship: boolean) {
+    this.stopVictoryAudio();
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain) return;
+
+    const now = ctx.currentTime;
+
+    // 1. Stadium crowd roar & applause (bandpass + highshelf filtered pink noise)
+    const bufLen = ctx.sampleRate * 4;
+    const crowdBuf = ctx.createBuffer(1, bufLen, ctx.sampleRate);
+    const data = crowdBuf.getChannelData(0);
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    for (let i = 0; i < bufLen; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.997 * b0 + white * 0.08;
+      b1 = 0.955 * b1 + white * 0.28;
+      b2 = 0.56 * b2 + white * 0.95;
+      // Modulate applause texture slightly
+      const ripple = 0.72 + 0.28 * Math.sin((i / ctx.sampleRate) * 28.0);
+      data[i] = (b0 + b1 + b2 + white * 0.16) * 0.095 * ripple;
+    }
+
+    const crowdSource = ctx.createBufferSource();
+    crowdSource.buffer = crowdBuf;
+    crowdSource.loop = true;
+
+    const crowdBp = ctx.createBiquadFilter();
+    crowdBp.type = 'bandpass';
+    crowdBp.frequency.value = isChampionship ? 1150 : 950;
+    crowdBp.Q.value = 0.65;
+
+    const crowdGain = ctx.createGain();
+    crowdGain.gain.setValueAtTime(0.001, now);
+    crowdGain.gain.linearRampToValueAtTime(
+      isChampionship ? 0.42 : 0.28,
+      now + 1.1,
+    );
+
+    crowdSource.connect(crowdBp);
+    crowdBp.connect(crowdGain);
+    crowdGain.connect(this.masterGain);
+    crowdSource.start(now);
+
+    this.victoryCrowdSource = crowdSource;
+    this.victoryCrowdGain = crowdGain;
+
+    // 2. Celebratory victory anthem progression
+    const anthemGain = ctx.createGain();
+    anthemGain.gain.setValueAtTime(0.001, now);
+    anthemGain.gain.linearRampToValueAtTime(
+      isChampionship ? 0.26 : 0.2,
+      now + 0.5,
+    );
+    anthemGain.connect(this.masterGain);
+    this.victoryAnthemGain = anthemGain;
+
+    // Triumphant brassy/orchestral chord progression (D major -> A major -> B minor -> G -> A -> D)
+    const chords: Array<{ bass: number; triad: number[]; dur: number }> = isChampionship
+      ? [
+          { bass: 73.42, triad: [293.66, 369.99, 440.0, 587.33], dur: 2.2 }, // D maj
+          { bass: 55.0, triad: [220.0, 277.18, 329.63, 440.0], dur: 2.0 }, // A maj
+          { bass: 61.74, triad: [246.94, 293.66, 369.99, 493.88], dur: 2.0 }, // Bm
+          { bass: 98.0, triad: [196.0, 246.94, 293.66, 392.0], dur: 1.8 }, // G maj
+          { bass: 110.0, triad: [220.0, 277.18, 329.63, 440.0], dur: 1.8 }, // A maj
+          { bass: 73.42, triad: [293.66, 369.99, 440.0, 587.33], dur: 3.0 }, // D maj finale
+        ]
+      : [
+          { bass: 73.42, triad: [293.66, 369.99, 440.0], dur: 2.0 },
+          { bass: 98.0, triad: [196.0, 246.94, 293.66], dur: 1.9 },
+          { bass: 110.0, triad: [220.0, 277.18, 329.63], dur: 1.9 },
+          { bass: 73.42, triad: [293.66, 369.99, 440.0], dur: 2.6 },
+        ];
+
+    let stepIdx = 0;
+    const playChord = () => {
+      if (!this.ctx || !this.victoryAnthemGain) return;
+      const t = this.ctx.currentTime;
+      const chord = chords[stepIdx % chords.length];
+      stepIdx += 1;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1400, t);
+      filter.frequency.exponentialRampToValueAtTime(650, t + chord.dur * 0.9);
+      filter.connect(this.victoryAnthemGain);
+
+      // Warm sub bass note
+      const bassOsc = this.ctx.createOscillator();
+      const bassGain = this.ctx.createGain();
+      bassOsc.type = 'triangle';
+      bassOsc.frequency.setValueAtTime(chord.bass, t);
+      bassGain.gain.setValueAtTime(0.001, t);
+      bassGain.gain.linearRampToValueAtTime(0.28, t + 0.08);
+      bassGain.gain.exponentialRampToValueAtTime(0.01, t + chord.dur);
+      bassOsc.connect(bassGain);
+      bassGain.connect(filter);
+      bassOsc.start(t);
+      bassOsc.stop(t + chord.dur + 0.05);
+
+      // Harmonic brass/pad voices
+      chord.triad.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const voiceGain = this.ctx.createGain();
+        osc.type = idx % 2 === 0 ? 'sawtooth' : 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        const peak = 0.08 / chord.triad.length;
+        voiceGain.gain.setValueAtTime(0.001, t);
+        voiceGain.gain.linearRampToValueAtTime(peak, t + 0.14);
+        voiceGain.gain.setValueAtTime(peak * 0.85, t + chord.dur * 0.7);
+        voiceGain.gain.exponentialRampToValueAtTime(0.001, t + chord.dur);
+        osc.connect(voiceGain);
+        voiceGain.connect(filter);
+        osc.start(t);
+        osc.stop(t + chord.dur + 0.05);
+      });
+    };
+
+    playChord();
+    this.victoryTimer = window.setInterval(() => {
+      if (!this.victoryAnthemGain) return;
+      playChord();
+      if (this.victoryCrowdGain && this.ctx) {
+        const t = this.ctx.currentTime;
+        const swell = isChampionship ? 0.52 : 0.34;
+        this.victoryCrowdGain.gain.setTargetAtTime(swell, t, 0.35);
+      }
+    }, isChampionship ? 2100 : 2000);
+  }
+
+  public playCelebrationBurst() {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.masterGain) return;
+
+    const now = ctx.currentTime;
+    // Confetti cannon pop + celebratory chime chord
+    const popBuf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.35), ctx.sampleRate);
+    const ch = popBuf.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) {
+      const env = Math.exp((-i / ctx.sampleRate) * 14);
+      ch[i] = (Math.random() * 2 - 1) * env * 0.45;
+    }
+    const popSrc = ctx.createBufferSource();
+    popSrc.buffer = popBuf;
+    const popFilter = ctx.createBiquadFilter();
+    popFilter.type = 'lowpass';
+    popFilter.frequency.setValueAtTime(1800, now);
+    popFilter.frequency.exponentialRampToValueAtTime(220, now + 0.32);
+
+    const popGain = ctx.createGain();
+    popGain.gain.setValueAtTime(0.55, now);
+
+    popSrc.connect(popFilter);
+    popFilter.connect(popGain);
+    popGain.connect(this.masterGain);
+    popSrc.start(now);
+
+    [587.33, 739.99, 880.0, 1174.66].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.04);
+      g.gain.setValueAtTime(0.001, now + idx * 0.04);
+      g.gain.linearRampToValueAtTime(0.11, now + idx * 0.04 + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.04 + 0.85);
+      osc.connect(g);
+      g.connect(this.masterGain!);
+      osc.start(now + idx * 0.04);
+      osc.stop(now + idx * 0.04 + 0.9);
+    });
+  }
+
+  public stopVictoryAudio() {
+    if (this.victoryTimer !== null) {
+      clearInterval(this.victoryTimer);
+      this.victoryTimer = null;
+    }
+    if (this.victoryCrowdSource) {
+      try {
+        this.victoryCrowdSource.stop();
+        this.victoryCrowdSource.disconnect();
+      } catch {
+        // ignore already stopped
+      }
+      this.victoryCrowdSource = null;
+    }
+    if (this.victoryCrowdGain && this.ctx) {
+      try {
+        this.victoryCrowdGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.victoryCrowdGain = null;
+    }
+    if (this.victoryAnthemGain) {
+      try {
+        this.victoryAnthemGain.disconnect();
+      } catch {
+        // ignore
+      }
+      this.victoryAnthemGain = null;
+    }
+  }
+
   public dispose() {
+    this.stopVictoryAudio();
     if (this.lfoTimer !== null) {
       clearInterval(this.lfoTimer);
       this.lfoTimer = null;

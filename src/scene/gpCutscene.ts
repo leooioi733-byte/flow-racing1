@@ -10,6 +10,7 @@ import {
 } from '../types/menu';
 import { AutodromeHandle } from './autodromeScene';
 import { AiFormulaCarHandle, FormulaCarHandle } from './formulaCar';
+import { createFlowHumanGeometries } from './humanAnatomy';
 import { createF1RacePantsTexture, createF1RaceSuitTexture } from './textures';
 
 export const GP_CUTSCENE_DURATION = 12.2;
@@ -111,26 +112,26 @@ export function createGpCutsceneRig(anisotropy: number): GpCutsceneRigHandle {
     return t;
   };
 
-  // Shared human silhouette primitives matching Flow Studios style
-  const headGeo = trackGeo(new THREE.SphereGeometry(0.135, 10, 8));
-  const hairCapGeo = trackGeo(
-    new THREE.SphereGeometry(0.142, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.56),
-  );
-  const torsoGeo = trackGeo(new THREE.BoxGeometry(0.36, 0.5, 0.2));
-  const shoulderGeo = trackGeo(new THREE.SphereGeometry(0.065, 8, 6));
-  const upperArmGeo = trackGeo(new THREE.CylinderGeometry(0.048, 0.044, 0.25, 7));
-  const forearmGeo = trackGeo(new THREE.CylinderGeometry(0.042, 0.038, 0.25, 7));
-  const handGeo = trackGeo(new THREE.BoxGeometry(0.065, 0.08, 0.065));
-  const legGeo = trackGeo(new THREE.CylinderGeometry(0.06, 0.052, 0.68, 8));
-  const footGeo = trackGeo(new THREE.BoxGeometry(0.1, 0.07, 0.19));
-  const headsetGeo = trackGeo(new THREE.TorusGeometry(0.145, 0.022, 6, 12, Math.PI));
+  // Shared human silhouette primitives matching smooth Flow Studios anatomy
+  const humanAnat = createFlowHumanGeometries(trackGeo);
+  const headGeo = humanAnat.headGeo;
+  const neckGeo = humanAnat.neckGeo;
+  const hairCapGeo = humanAnat.hairShortGeo;
+  const torsoGeo = humanAnat.torsoGeo;
+  const shoulderGeo = humanAnat.shoulderGeo;
+  const upperArmGeo = humanAnat.upperArmGeo;
+  const forearmGeo = humanAnat.forearmGeo;
+  const handGeo = humanAnat.handGeo;
+  const legGeo = humanAnat.legGeo;
+  const footGeo = humanAnat.footGeo;
+  const headsetGeo = humanAnat.headsetGeo;
   const tabletGeo = trackGeo(new THREE.BoxGeometry(0.32, 0.22, 0.025));
-  const wheelGunBodyGeo = trackGeo(new THREE.BoxGeometry(0.14, 0.14, 0.28));
-  const wheelGunNozzleGeo = trackGeo(new THREE.CylinderGeometry(0.032, 0.036, 0.18, 8));
+  const wheelGunBodyGeo = trackGeo(new THREE.CapsuleGeometry(0.062, 0.14, 5, 10));
+  wheelGunBodyGeo.rotateX(Math.PI * 0.5);
+  const wheelGunNozzleGeo = trackGeo(new THREE.CylinderGeometry(0.032, 0.036, 0.18, 10));
   wheelGunNozzleGeo.rotateX(Math.PI * 0.5);
-  const heldHelmetGeo = trackGeo(new THREE.SphereGeometry(0.145, 14, 10));
-  heldHelmetGeo.scale(0.94, 0.96, 1.12);
-  const heldVisorGeo = trackGeo(new THREE.BoxGeometry(0.185, 0.062, 0.075));
+  const heldHelmetGeo = humanAnat.heldHelmetGeo;
+  const heldVisorGeo = humanAnat.heldVisorGeo;
 
   const initLiv = LIVERY_OPTIONS[3];
   let teamSuitTex = trackTex(
@@ -267,7 +268,7 @@ export function createGpCutsceneRig(anisotropy: number): GpCutsceneRigHandle {
       leg.position.set(lx, opts.crouched ? 0.28 : 0.4, opts.crouched ? -0.06 : 0);
       if (opts.crouched) leg.rotation.x = 0.55;
       const foot = new THREE.Mesh(footGeo, steelMat);
-      foot.position.set(lx, 0.035, 0.045);
+      foot.position.set(lx, 0.033, 0.045);
       root.add(leg, foot);
     });
 
@@ -279,6 +280,10 @@ export function createGpCutsceneRig(anisotropy: number): GpCutsceneRigHandle {
     const headPivot = new THREE.Group();
     headPivot.position.set(0, 1.32 + crouchDip, opts.crouched ? 0.08 : 0);
 
+    const neck = new THREE.Mesh(neckGeo, opts.helmeted ? opts.suitMat : opts.headMat);
+    neck.position.set(0, -0.045, 0);
+    headPivot.add(neck);
+
     const head = new THREE.Mesh(
       headGeo,
       opts.helmeted ? (opts.helmetMat ?? opts.suitMat) : opts.headMat,
@@ -288,7 +293,8 @@ export function createGpCutsceneRig(anisotropy: number): GpCutsceneRigHandle {
 
     if (opts.helmeted) {
       const visor = new THREE.Mesh(heldVisorGeo, visorMat);
-      visor.position.set(0, 0.11, 0.11);
+      visor.position.set(0, 0.1, 0);
+      visor.scale.set(0.94, 0.94, 0.94);
       const headset = new THREE.Mesh(headsetGeo, steelMat);
       headset.position.set(0, 0.12, 0);
       headPivot.add(visor, headset);
@@ -317,9 +323,8 @@ export function createGpCutsceneRig(anisotropy: number): GpCutsceneRigHandle {
       hShell.position.set(-0.07, -0.34, 0.15);
       hShell.rotation.y = -0.35;
       const hVis = new THREE.Mesh(heldVisorGeo, visorMat);
-      hVis.position.set(-0.11, -0.34, 0.28);
-      hVis.rotation.y = -0.35;
-      leftArmPivot.add(hShell, hVis);
+      hShell.add(hVis);
+      leftArmPivot.add(hShell);
     }
     root.add(leftArmPivot);
 
