@@ -1,0 +1,18 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.flowstudios.flowracing',
+  appName: 'FLOW RACING',
+  webDir: 'dist',
+  backgroundColor: '#0e1720',
+  server: {
+    androidScheme: 'https',
+  },
+  android: {
+    allowMixedContent: false,
+    captureInput: true,
+    webContentsDebuggingEnabled: false,
+  },
+};
+
+export default config;

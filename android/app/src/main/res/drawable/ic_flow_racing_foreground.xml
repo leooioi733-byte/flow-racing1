@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Subtle racing grid ring -->
+    <path
+        android:fillColor="#162230"
+        android:pathData="M54,18 A36,36 0 1,1 53.99,18 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#38BDF8"
+        android:strokeAlpha="0.35"
+        android:strokeWidth="1.8"
+        android:pathData="M54,20 A34,34 0 1,1 53.99,20 Z" />
+
+    <!-- Stylized Formula Wing / Apex Emblem -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M31,42 L77,42 L72,50 L44,50 L41,56 L66,56 L61,64 L37,64 L32,74 L24,74 Z" />
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M48,32 L82,32 L78,39 L44,39 Z" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M65,64 L78,64 L73,74 L60,74 Z" />
+</vector>

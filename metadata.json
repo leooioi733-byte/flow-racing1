@@ -1,0 +1,6 @@
+{
+  "name": "FLOW RACING",
+  "description": "Flow Racing — Stage 1 Home Screen & 3D Formula Showcase by Flow Studios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

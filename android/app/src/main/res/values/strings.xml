@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FLOW RACING</string>
+    <string name="title_activity_main">FLOW RACING</string>
+    <string name="package_name">com.flowstudios.flowracing</string>
+    <string name="custom_url_scheme">com.flowstudios.flowracing</string>
+</resources>
